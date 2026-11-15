@@ -15,8 +15,10 @@ SceneKit, Metal). Interface, textos e identidade próprios.
 | Marco | Conteúdo | Situação |
 |---|---|---|
 | M0 | Pipeline código → CI → `.ipa` → sideload, tela com status do LiDAR | aceito (iPad Pro M2 e iPhone 15 Pro, sistema 27) |
-| M1 | Captura da malha LiDAR, bruto `mesh.bin`, export PLY e OBJ, biblioteca básica, logs | em teste |
-| M2 a M10 | Cor, RoomPlan, biblioteca completa, viewer, exportações, processamento, editor, medição | a fazer |
+| M1 | Captura da malha LiDAR, bruto `mesh.bin`, export PLY e OBJ, biblioteca básica, logs | aceito |
+| M2A | Keyframes (foto + pose) durante o scan e cor por vértice no PLY e no OBJ | em teste |
+| M2B | Teste de oclusão com o mapa de profundidade (já é salvo no M2A) | a fazer |
+| M3 a M10 | RoomPlan, biblioteca completa, viewer, exportações, processamento, editor, medição | a fazer |
 
 ## Como usar (M1)
 
@@ -32,8 +34,22 @@ O que é gravado para cada scan, em `Documents/Scans/<id>/`:
 |---|---|
 | `meta.json` | nome, data, aparelho, versão do app, contagens |
 | `mesh.bin` | malha bruta do LiDAR, por bloco, no formato próprio `SLMESH01` (nunca é sobrescrita) |
-| `outputs/scan-<id>-zup.ply` | malha em PLY binário, com normais e classificação por face |
-| `outputs/scan-<id>-zup.obj` + `.mtl` | a mesma malha em OBJ |
+| `frames/000012.jpg` | fotos (keyframes) em JPEG, na orientação nativa do sensor |
+| `frames.json` | para cada foto: índice, timestamp, pose da câmera (16 floats), intrínsecas (9 floats) e resolução |
+| `depth/000012.bin` | mapa de profundidade do LiDAR da mesma foto (formato `SLDEPTH1`: milímetros em 16 bits + confiança) |
+| `outputs/scan-<id>-zup.ply` | malha em PLY binário, com normais, cor por vértice e classificação por face |
+| `outputs/scan-<id>-zup.obj` + `.mtl` | a mesma malha em OBJ, com cor por vértice (`v x y z r g b`) |
+
+### Como a cor é calculada (M2A)
+
+Durante o scan o app salva uma foto quando passaram 0,4 s desde a última **e** a câmera
+andou mais de 15 cm **ou** girou mais de 15 graus (valores ajustáveis em Ajustes; teto de
+400 fotos). Na exportação, cada vértice da malha recebe a cor da foto que o vê melhor:
+de frente (normal apontando para a câmera), de perto e longe da borda da imagem.
+
+Limite atual: ainda não há teste de oclusão. Um objeto atrás de outro, ou o cômodo do
+outro lado de uma parede fina, pode pegar a cor errada. O M2B resolve isso com o mapa de
+profundidade, que já está sendo salvo.
 
 O sufixo é `zup` (Z para cima, padrão de CAD e CloudCompare) ou `yup` (Y para cima, como no ARKit).
 A conversão é `(x, y, z) → (x, -z, y)`.

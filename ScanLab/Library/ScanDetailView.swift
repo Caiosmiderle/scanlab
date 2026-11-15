@@ -22,7 +22,7 @@ final class ExportJob: ObservableObject {
         // Trabalho pesado fora da thread principal; a interface só recebe o progresso.
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let result = try MeshExporter.exportPLYAndOBJ(scanID: scanID, axis: axis) { fraction, text in
+                let result = try MeshExporter.exportPLYAndOBJ(scanID: scanID, axis: axis, colorize: AppSettings.colorizeOnExport) { fraction, text in
                     DispatchQueue.main.async {
                         self.progress = fraction
                         self.message = text
@@ -95,6 +95,7 @@ struct ScanDetailView: View {
                 infoRow("Triângulos", "\(scan.faceCount)")
                 infoRow("Vértices", "\(scan.vertexCount)")
                 infoRow("Blocos de malha", "\(scan.anchorCount)")
+                infoRow("Fotos para cor", (scan.keyframeCount ?? 0) > 0 ? "\(scan.keyframeCount ?? 0)" : "nenhuma (scan sem cor)")
                 infoRow("Classificação", scan.reconstructionMode == "meshWithClassification" ? "Sim" : "Não")
                 infoRow("Tamanho em disco", AppPaths.formatBytes(diskSize))
                 infoRow("Situação", scan.status)

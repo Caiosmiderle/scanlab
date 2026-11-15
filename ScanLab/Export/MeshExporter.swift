@@ -29,6 +29,7 @@ enum MeshExporter {
     /// - Parameter progress: fração de 0 a 1 e texto da etapa. Chamado na fila de trabalho.
     static func exportPLYAndOBJ(scanID: String,
                                 axis: UpAxis,
+                                colorize: Bool,
                                 progress: @escaping (Double, String) -> Void) throws -> ExportResult {
         let started = Date()
         let store = ScanStore.shared
@@ -50,6 +51,18 @@ enum MeshExporter {
         guard mesh.faceCount > 0 else {
             throw ExportError.emptyMesh
         }
+
+        // Cor por vértice. Tem de acontecer ANTES da troca de eixo: as poses das
+        // câmeras estão no mundo do ARKit (Y-up), o mesmo da malha neste ponto.
+        var colored = false
+        if colorize {
+            progress(0.12, "Colorindo a malha...")
+            let report = ColorProcessor.colorize(mesh: &mesh, scanID: scanID) { fraction in
+                progress(0.12 + 0.43 * fraction, "Colorindo a malha...")
+            }
+            colored = report != nil
+        }
+
         mesh.applyAxis(axis)
 
         let outputs = store.outputsDirectory(for: scanID)
@@ -64,13 +77,13 @@ enum MeshExporter {
         do {
             let plySink = try FileSink(url: plyURL)
             try PLYWriter.writeMesh(mesh, to: plySink) { fraction in
-                progress(0.15 + 0.35 * fraction, "Gravando PLY...")
+                progress(0.56 + 0.14 * fraction, "Gravando PLY...")
             }
             try plySink.close()
 
             let objSink = try FileSink(url: objURL)
             try OBJWriter.write(mesh, to: objSink, materialLibraryName: mtlURL.lastPathComponent) { fraction in
-                progress(0.50 + 0.48 * fraction, "Gravando OBJ...")
+                progress(0.70 + 0.28 * fraction, "Gravando OBJ...")
             }
             try objSink.close()
 
@@ -86,7 +99,7 @@ enum MeshExporter {
         let seconds = Date().timeIntervalSince(started)
         let plySize = AppPaths.formatBytes(AppPaths.fileSize(plyURL))
         let objSize = AppPaths.formatBytes(AppPaths.fileSize(objURL))
-        AppLog.info(.export, "Export do scan \(scanID): eixo=\(axis.rawValue) vértices=\(mesh.vertexCount) faces=\(mesh.faceCount) ply=\(plySize) obj=\(objSize) tempo=\(String(format: "%.1f", seconds))s")
+        AppLog.info(.export, "Export do scan \(scanID): eixo=\(axis.rawValue) cor=\(colored ? "sim" : "não") vértices=\(mesh.vertexCount) faces=\(mesh.faceCount) ply=\(plySize) obj=\(objSize) tempo=\(String(format: "%.1f", seconds))s")
 
         progress(1.0, "Concluído")
         return ExportResult(files: [plyURL, objURL, mtlURL],
