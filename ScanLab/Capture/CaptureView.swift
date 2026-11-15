@@ -84,6 +84,7 @@ struct CaptureView: View {
             hudItem(icon: "timer", text: formatDuration(controller.elapsedSeconds), label: "Tempo de scan")
             hudItem(icon: "square.grid.3x3", text: "\(controller.anchorCount)", label: "Blocos de malha")
             hudItem(icon: "triangle", text: formatCount(controller.triangleCount), label: "Triângulos")
+            hudItem(icon: "photo.on.rectangle", text: "\(controller.keyframeCount)", label: "Fotos para cor")
             hudItem(icon: "thermometer.medium",
                     text: ThermalMonitor.label(controller.thermalState),
                     label: "Temperatura do aparelho",

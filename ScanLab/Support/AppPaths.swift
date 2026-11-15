@@ -1,4 +1,5 @@
 import Foundation
+import ScanCore
 
 /// Caminhos do app. Tudo fica em Documents, que aparece no app Arquivos do iPad
 /// (UIFileSharingEnabled + LSSupportsOpeningDocumentsInPlace no Info.plist).
@@ -16,6 +17,15 @@ enum AppPaths {
 
     static var logsRoot: URL {
         return documents.appendingPathComponent("Logs", isDirectory: true)
+    }
+
+    /// Pasta das capturas em andamento. Fica FORA de Documents de propósito: não aparece
+    /// no app Arquivos e, diferente da pasta temporária, o sistema não a limpa sozinho.
+    /// Ao finalizar o scan, o conteúdo é movido para `Documents/Scans/<id>/`.
+    static var captureRoot: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("CaptureInProgress", isDirectory: true)
     }
 
     static func ensureDirectory(_ url: URL) throws {
@@ -55,4 +65,50 @@ enum AppPaths {
 enum SettingsKeys {
     /// Eixo "para cima" das exportações: valor bruto de `UpAxis` ("yUp" ou "zUp").
     static let exportUpAxis = "exportUpAxis"
+    /// Colorir a malha com os keyframes ao exportar.
+    static let colorizeOnExport = "colorizeOnExport"
+    /// Salvar o mapa de profundidade junto de cada keyframe.
+    static let saveDepth = "saveDepth"
+    static let keyframeInterval = "keyframeInterval"
+    static let keyframeDistanceCm = "keyframeDistanceCm"
+    static let keyframeAngle = "keyframeAngle"
+    static let keyframeMaxCount = "keyframeMaxCount"
+}
+
+/// Leitura dos ajustes com os valores padrão da especificação.
+enum AppSettings {
+    static let defaultKeyframeInterval: Double = 0.4
+    static let defaultKeyframeDistanceCm: Double = 15
+    static let defaultKeyframeAngle: Double = 15
+    static let defaultKeyframeMaxCount: Double = 400
+
+    private static func double(_ key: String, _ fallback: Double) -> Double {
+        // object(forKey:) devolve nil quando o usuário nunca mexeu no ajuste.
+        if let number = UserDefaults.standard.object(forKey: key) as? NSNumber {
+            return number.doubleValue
+        }
+        return fallback
+    }
+
+    private static func bool(_ key: String, _ fallback: Bool) -> Bool {
+        if let number = UserDefaults.standard.object(forKey: key) as? NSNumber {
+            return number.boolValue
+        }
+        return fallback
+    }
+
+    static var keyframeSettings: KeyframeSettings {
+        return KeyframeSettings(minInterval: double(SettingsKeys.keyframeInterval, defaultKeyframeInterval),
+                                minDistance: Float(double(SettingsKeys.keyframeDistanceCm, defaultKeyframeDistanceCm) / 100),
+                                minAngleDegrees: Float(double(SettingsKeys.keyframeAngle, defaultKeyframeAngle)),
+                                maxCount: Int(double(SettingsKeys.keyframeMaxCount, defaultKeyframeMaxCount)))
+    }
+
+    static var saveDepth: Bool {
+        return bool(SettingsKeys.saveDepth, true)
+    }
+
+    static var colorizeOnExport: Bool {
+        return bool(SettingsKeys.colorizeOnExport, true)
+    }
 }

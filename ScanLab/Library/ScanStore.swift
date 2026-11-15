@@ -17,6 +17,8 @@ struct ScanMeta: Codable, Identifiable, Equatable {
     var reconstructionMode: String
     /// "bruto" ou "processado".
     var status: String
+    /// Quantos keyframes foram salvos. Opcional: scans feitos antes do M2 não têm o campo.
+    var keyframeCount: Int?
 }
 
 enum ScanStoreError: Error, LocalizedError {
@@ -60,6 +62,10 @@ final class ScanStore: ObservableObject {
         return directory(for: id).appendingPathComponent("meta.json")
     }
 
+    func framesURL(for id: String) -> URL {
+        return directory(for: id).appendingPathComponent("frames.json")
+    }
+
     // MARK: - Leitura (chamar na thread principal)
 
     /// Relê a pasta de scans do disco e atualiza a lista publicada.
@@ -97,9 +103,14 @@ final class ScanStore: ObservableObject {
 
     // MARK: - Escrita
 
-    /// Cria a pasta do scan e grava `mesh.bin` e `meta.json`.
+    /// Cria a pasta do scan e grava `mesh.bin`, `meta.json` e, se houver keyframes,
+    /// move `frames/` e `depth/` da pasta de captura e grava o `frames.json`.
     /// Só mexe em arquivos (não na lista publicada), então pode rodar em fila de background.
-    func createScan(anchors: [MeshAnchorData], durationSeconds: Double, reconstructionMode: String) throws -> ScanMeta {
+    func createScan(anchors: [MeshAnchorData],
+                    durationSeconds: Double,
+                    reconstructionMode: String,
+                    captureDirectory: URL?,
+                    keyframes: [KeyframeRecord]) throws -> ScanMeta {
         var vertexCount = 0
         var faceCount = 0
         for anchor in anchors {
@@ -122,6 +133,24 @@ final class ScanStore: ObservableObject {
             try RawMeshFile.write(anchors: anchors, to: sink)
             try sink.close()
 
+            // Keyframes: mover (não copiar) da pasta de captura. No mesmo volume isso é
+            // só uma troca de nome, instantânea mesmo com centenas de megabytes.
+            var keyframeCount = 0
+            if let captureDirectory = captureDirectory, !keyframes.isEmpty {
+                let fileManager = FileManager.default
+                for name in ["frames", "depth"] {
+                    let source = captureDirectory.appendingPathComponent(name, isDirectory: true)
+                    if fileManager.fileExists(atPath: source.path) {
+                        try fileManager.moveItem(at: source, to: folder.appendingPathComponent(name, isDirectory: true))
+                    }
+                }
+                try FramesFile(frames: keyframes).encoded().write(to: framesURL(for: id), options: .atomic)
+                keyframeCount = keyframes.count
+            }
+            if let captureDirectory = captureDirectory {
+                try? FileManager.default.removeItem(at: captureDirectory)
+            }
+
             let nameFormatter = DateFormatter()
             nameFormatter.locale = Locale(identifier: "pt_BR")
             nameFormatter.dateFormat = "dd/MM/yyyy HH:mm"
@@ -137,7 +166,8 @@ final class ScanStore: ObservableObject {
                                 vertexCount: vertexCount,
                                 faceCount: faceCount,
                                 reconstructionMode: reconstructionMode,
-                                status: "bruto")
+                                status: "bruto",
+                                keyframeCount: keyframeCount)
             try saveMeta(meta)
             return meta
         } catch {

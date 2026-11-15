@@ -24,6 +24,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var elapsedSeconds: Double = 0
     @Published private(set) var anchorCount: Int = 0
     @Published private(set) var triangleCount: Int = 0
+    @Published private(set) var keyframeCount: Int = 0
     @Published private(set) var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     @Published private(set) var memoryWarning: Bool = false
     @Published private(set) var trackingMessage: String? = nil
@@ -39,6 +40,10 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     /// guardar por `identifier` e sobrescrever garante que, ao finalizar, cada pedaço
     /// da sala apareça uma única vez, na versão final.
     private var meshAnchors: [UUID: ARMeshAnchor] = [:]
+
+    /// Grava os keyframes (fotos e poses) do scan em andamento. `nil` fora de um scan
+    /// ou se a pasta de captura não pôde ser criada (o scan segue, só sem cor).
+    private var recorder: KeyframeRecorder?
 
     private var configuration: ARWorldTrackingConfiguration?
     private var reconstructionMode: String = "mesh"
@@ -130,6 +135,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         session.pause()
         stopTimer()
         meshAnchors.removeAll()
+        recorder?.discard()
+        recorder = nil
         resetCounters()
         state = .idle
         AppLog.info(.capture, "Scan cancelado pelo usuário")
@@ -160,8 +167,23 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         let axisRaw = UserDefaults.standard.string(forKey: SettingsKeys.exportUpAxis) ?? UpAxis.zUp.rawValue
         let axis = UpAxis(rawValue: axisRaw) ?? .zUp
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            self.saveScan(anchors: anchors, duration: duration, mode: mode, axis: axis)
+        let activeRecorder = recorder
+        recorder = nil
+        if let activeRecorder = activeRecorder {
+            // Espera o último keyframe terminar de ser gravado antes de salvar o scan.
+            activeRecorder.finalize { records in
+                AppLog.info(.capture, "Keyframes: salvos=\(records.count) descartados por fila ocupada=\(activeRecorder.droppedCount) falhas=\(activeRecorder.failedCount)")
+                let captureDirectory = activeRecorder.directory
+                DispatchQueue.global(qos: .userInitiated).async {
+                    self.saveScan(anchors: anchors, duration: duration, mode: mode, axis: axis,
+                                  captureDirectory: captureDirectory, keyframes: records)
+                }
+            }
+        } else {
+            DispatchQueue.global(qos: .userInitiated).async {
+                self.saveScan(anchors: anchors, duration: duration, mode: mode, axis: axis,
+                              captureDirectory: nil, keyframes: [])
+            }
         }
     }
 
@@ -198,6 +220,26 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             return
         }
 
+        // Profundidade do LiDAR em cada quadro, para salvar junto dos keyframes.
+        // A versão suavizada no tempo tem menos ruído; se não houver, usa a direta.
+        let saveDepth = AppSettings.saveDepth
+        if saveDepth {
+            if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) {
+                configuration.frameSemantics.insert(.smoothedSceneDepth)
+            } else if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+                configuration.frameSemantics.insert(.sceneDepth)
+            }
+        }
+
+        let keyframeSettings = AppSettings.keyframeSettings
+        do {
+            recorder = try KeyframeRecorder(settings: keyframeSettings, saveDepth: saveDepth)
+        } catch {
+            recorder = nil
+            AppLog.error(.capture, "Não foi possível preparar a gravação de keyframes: \(error.localizedDescription). O scan ficará sem cor.")
+        }
+        AppLog.info(.capture, "Keyframes: intervalo=\(keyframeSettings.minInterval) s distância=\(keyframeSettings.minDistance) m ângulo=\(keyframeSettings.minAngleDegrees) graus teto=\(keyframeSettings.maxCount) profundidade=\(saveDepth)")
+
         self.configuration = configuration
         meshAnchors.removeAll()
         resetCounters()
@@ -217,7 +259,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     // MARK: - Gravação (fila de background)
 
-    private func saveScan(anchors: [ARMeshAnchor], duration: Double, mode: String, axis: UpAxis) {
+    private func saveScan(anchors: [ARMeshAnchor], duration: Double, mode: String, axis: UpAxis,
+                          captureDirectory: URL?, keyframes: [KeyframeRecord]) {
         let started = Date()
         reportSaving(0.05, "Lendo a malha do sensor...")
 
@@ -239,15 +282,17 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             reportSaving(0.15, "Salvando dados brutos...")
             let meta = try ScanStore.shared.createScan(anchors: extracted,
                                                       durationSeconds: duration,
-                                                      reconstructionMode: mode)
+                                                      reconstructionMode: mode,
+                                                      captureDirectory: captureDirectory,
+                                                      keyframes: keyframes)
             let rawSeconds = Date().timeIntervalSince(started)
-            AppLog.info(.capture, "Bruto salvo: id=\(meta.id) âncoras=\(meta.anchorCount) vértices=\(meta.vertexCount) faces=\(meta.faceCount) tempo=\(String(format: "%.1f", rawSeconds))s")
+            AppLog.info(.capture, "Bruto salvo: id=\(meta.id) âncoras=\(meta.anchorCount) vértices=\(meta.vertexCount) faces=\(meta.faceCount) keyframes=\(meta.keyframeCount ?? 0) tempo=\(String(format: "%.1f", rawSeconds))s")
 
             // O bruto já está em disco. Se a exportação falhar, o scan continua na
             // biblioteca e pode ser exportado de novo por lá.
             var exportNote = ""
             do {
-                _ = try MeshExporter.exportPLYAndOBJ(scanID: meta.id, axis: axis) { fraction, text in
+                _ = try MeshExporter.exportPLYAndOBJ(scanID: meta.id, axis: axis, colorize: AppSettings.colorizeOnExport) { fraction, text in
                     self.reportSaving(0.25 + 0.75 * fraction, text)
                 }
             } catch {
@@ -261,6 +306,9 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             }
         } catch {
             AppLog.error(.capture, "Falha ao salvar o scan: \(error.localizedDescription)")
+            if let captureDirectory = captureDirectory {
+                try? FileManager.default.removeItem(at: captureDirectory)
+            }
             let message = error.localizedDescription
             DispatchQueue.main.async {
                 self.finishSaving(summary: nil, errorMessage: message)
@@ -318,6 +366,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         elapsedSeconds = 0
         anchorCount = 0
         triangleCount = 0
+        keyframeCount = 0
         trackingMessage = nil
     }
 
@@ -337,6 +386,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         }
         anchorCount = meshAnchors.count
         triangleCount = triangles
+        keyframeCount = recorder?.records.count ?? 0
     }
 
     // MARK: - Notificações do sistema
@@ -396,6 +446,17 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
         storeMeshAnchors(anchors)
+    }
+
+    /// Chamado a cada quadro da câmera (até 60 por segundo), na thread principal.
+    /// Tem de ser rápido e NÃO pode guardar o `ARFrame`: quem segura quadros faz o
+    /// ARKit ficar sem buffers e a câmera travar. O gravador decide em microssegundos
+    /// se o quadro interessa e só então copia o que precisa.
+    func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        guard state == .scanning, let recorder = recorder else {
+            return
+        }
+        recorder.consider(frame)
     }
 
     func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
