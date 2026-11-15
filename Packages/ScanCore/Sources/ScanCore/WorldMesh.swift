@@ -72,6 +72,150 @@ public struct WorldMesh {
         }
     }
 
+    /// Limpeza mínima antes de exportar. Chamar com a malha ainda em Y-up.
+    ///
+    /// O ARKit entrega, em cada bloco, alguns vértices que nenhuma face usa, e eles vêm
+    /// com normal `nan` (medido num scan real: 654 de 116 mil). Num OBJ isso vira a
+    /// linha `vn nan nan nan`, que alguns programas recusam. Aqui:
+    /// 1. faces com índice fora do intervalo ou com posição não finita são descartadas;
+    /// 2. vértices que nenhuma face usa são removidos e os índices, renumerados;
+    /// 3. um vértice usado que tenha normal inválida recebe a média das normais
+    ///    geométricas das faces vizinhas.
+    @discardableResult
+    public mutating func removeUnusedAndInvalid() -> MeshCleanupReport {
+        let oldVertexCount = vertexCount
+        let oldFaceCount = faceCount
+
+        var positionValid = [Bool](repeating: true, count: oldVertexCount)
+        for vertex in 0..<oldVertexCount {
+            let offset = vertex * 3
+            if !(positions[offset].isFinite && positions[offset + 1].isFinite && positions[offset + 2].isFinite) {
+                positionValid[vertex] = false
+            }
+        }
+
+        // 1. Faces válidas e quais vértices elas usam.
+        var used = [Bool](repeating: false, count: oldVertexCount)
+        var keptIndices: [UInt32] = []
+        var keptClassifications: [UInt8] = []
+        keptIndices.reserveCapacity(indices.count)
+        keptClassifications.reserveCapacity(classifications.count)
+        for face in 0..<oldFaceCount {
+            let a = Int(indices[face * 3])
+            let b = Int(indices[face * 3 + 1])
+            let c = Int(indices[face * 3 + 2])
+            if a >= oldVertexCount || b >= oldVertexCount || c >= oldVertexCount {
+                continue
+            }
+            if !positionValid[a] || !positionValid[b] || !positionValid[c] {
+                continue
+            }
+            keptIndices.append(UInt32(a))
+            keptIndices.append(UInt32(b))
+            keptIndices.append(UInt32(c))
+            keptClassifications.append(classifications[face])
+            used[a] = true
+            used[b] = true
+            used[c] = true
+        }
+
+        // 2. Normais inválidas em vértices usados: zera e reconstrói pelas faces.
+        var needsRepair = [Bool](repeating: false, count: oldVertexCount)
+        var repairedNormals = 0
+        for vertex in 0..<oldVertexCount where used[vertex] {
+            let offset = vertex * 3
+            let normal = SIMD3<Float>(normals[offset], normals[offset + 1], normals[offset + 2])
+            let finite = normal.x.isFinite && normal.y.isFinite && normal.z.isFinite
+            if !finite || simd_length_squared(normal) < 1e-12 {
+                needsRepair[vertex] = true
+                repairedNormals += 1
+                normals[offset] = 0
+                normals[offset + 1] = 0
+                normals[offset + 2] = 0
+            }
+        }
+        if repairedNormals > 0 {
+            var face = 0
+            while face * 3 + 2 < keptIndices.count {
+                let a = Int(keptIndices[face * 3])
+                let b = Int(keptIndices[face * 3 + 1])
+                let c = Int(keptIndices[face * 3 + 2])
+                face += 1
+                if !(needsRepair[a] || needsRepair[b] || needsRepair[c]) {
+                    continue
+                }
+                // Produto vetorial sem normalizar: faces maiores pesam mais na média.
+                let geometric = simd_cross(position(b) - position(a), position(c) - position(a))
+                if !(geometric.x.isFinite && geometric.y.isFinite && geometric.z.isFinite) {
+                    continue
+                }
+                for vertex in [a, b, c] where needsRepair[vertex] {
+                    normals[vertex * 3] += geometric.x
+                    normals[vertex * 3 + 1] += geometric.y
+                    normals[vertex * 3 + 2] += geometric.z
+                }
+            }
+            for vertex in 0..<oldVertexCount where needsRepair[vertex] {
+                let offset = vertex * 3
+                var normal = SIMD3<Float>(normals[offset], normals[offset + 1], normals[offset + 2])
+                let length = simd_length(normal)
+                if length.isFinite && length > 0 {
+                    normal = normal / length
+                } else {
+                    // Sem nenhuma face aproveitável: aponta para cima (Y-up do ARKit).
+                    normal = SIMD3<Float>(0, 1, 0)
+                }
+                normals[offset] = normal.x
+                normals[offset + 1] = normal.y
+                normals[offset + 2] = normal.z
+            }
+        }
+
+        // 3. Compacta: mantém só os vértices usados e renumera os índices.
+        var remap = [UInt32](repeating: 0, count: oldVertexCount)
+        var newPositions: [Float] = []
+        var newNormals: [Float] = []
+        var newColors: [UInt8] = []
+        newPositions.reserveCapacity(positions.count)
+        newNormals.reserveCapacity(normals.count)
+        var nextIndex: UInt32 = 0
+        for vertex in 0..<oldVertexCount where used[vertex] {
+            let offset = vertex * 3
+            remap[vertex] = nextIndex
+            nextIndex += 1
+            newPositions.append(positions[offset])
+            newPositions.append(positions[offset + 1])
+            newPositions.append(positions[offset + 2])
+            newNormals.append(normals[offset])
+            newNormals.append(normals[offset + 1])
+            newNormals.append(normals[offset + 2])
+            if let colors = colors {
+                newColors.append(colors[offset])
+                newColors.append(colors[offset + 1])
+                newColors.append(colors[offset + 2])
+            }
+        }
+        for slot in 0..<keptIndices.count {
+            keptIndices[slot] = remap[Int(keptIndices[slot])]
+        }
+
+        let hadColors = colors != nil
+        positions = newPositions
+        normals = newNormals
+        indices = keptIndices
+        classifications = keptClassifications
+        colors = hadColors ? newColors : nil
+
+        return MeshCleanupReport(removedVertices: oldVertexCount - vertexCount,
+                                 removedFaces: oldFaceCount - faceCount,
+                                 repairedNormals: repairedNormals)
+    }
+
+    private func position(_ vertex: Int) -> SIMD3<Float> {
+        let offset = vertex * 3
+        return SIMD3<Float>(positions[offset], positions[offset + 1], positions[offset + 2])
+    }
+
     /// Caixa delimitadora (mínimo e máximo de cada eixo). `nil` se a malha estiver vazia.
     public func bounds() -> (min: SIMD3<Float>, max: SIMD3<Float>)? {
         if vertexCount == 0 {
@@ -87,6 +231,23 @@ public struct WorldMesh {
             offset += 3
         }
         return (lower, upper)
+    }
+}
+
+/// O que `WorldMesh.removeUnusedAndInvalid()` mudou na malha (vai para o log).
+public struct MeshCleanupReport: Equatable {
+    public var removedVertices: Int
+    public var removedFaces: Int
+    public var repairedNormals: Int
+
+    public init(removedVertices: Int, removedFaces: Int, repairedNormals: Int) {
+        self.removedVertices = removedVertices
+        self.removedFaces = removedFaces
+        self.repairedNormals = repairedNormals
+    }
+
+    public var changedSomething: Bool {
+        return removedVertices > 0 || removedFaces > 0 || repairedNormals > 0
     }
 }
 

@@ -42,6 +42,11 @@ enum MeshExporter {
 
         progress(0.10, "Montando a malha...")
         var mesh = MeshBuilder.worldMesh(from: anchors)
+        // O bruto fica como o sensor entregou; a limpeza acontece só na saída.
+        let cleanup = mesh.removeUnusedAndInvalid()
+        if cleanup.changedSomething {
+            AppLog.info(.export, "Limpeza do scan \(scanID): vértices soltos removidos=\(cleanup.removedVertices) faces inválidas removidas=\(cleanup.removedFaces) normais refeitas=\(cleanup.repairedNormals)")
+        }
         guard mesh.faceCount > 0 else {
             throw ExportError.emptyMesh
         }
