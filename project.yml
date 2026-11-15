@@ -1,0 +1,53 @@
+name: ScanLab
+options:
+  bundleIdPrefix: com.caio
+  developmentLanguage: pt-BR
+  # Deployment target: este é o ÚNICO lugar do app onde a versão mínima é definida.
+  # (O pacote ScanCore declara a sua em Packages/ScanCore/Package.swift; manter igual.)
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  ScanCore:
+    path: Packages/ScanCore
+targets:
+  ScanLab:
+    type: application
+    platform: iOS
+    sources: [ScanLab]
+    dependencies:
+      - package: ScanCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.caio.scanlab
+        SWIFT_VERSION: "5.0"
+        # Sem concorrência estrita: erro de compilação só aparece no CI, então
+        # ficamos no modo mais permissivo do Swift 5.
+        SWIFT_STRICT_CONCURRENCY: minimal
+        TARGETED_DEVICE_FAMILY: "1,2"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+    info:
+      path: ScanLab/Info.plist
+      properties:
+        CFBundleDisplayName: ScanLab
+        # Sem estas duas linhas o XcodeGen grava "1.0"/"1" fixos e ignora
+        # MARKETING_VERSION / CURRENT_PROJECT_VERSION.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSCameraUsageDescription: "O ScanLab usa a câmera e o LiDAR para escanear ambientes."
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UIRequiredDeviceCapabilities: [arkit]
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+# Scheme explícito para o CI não depender da criação automática de schemes do Xcode.
+schemes:
+  ScanLab:
+    build:
+      targets:
+        ScanLab: all
+    run:
+      config: Debug
+    archive:
+      config: Release

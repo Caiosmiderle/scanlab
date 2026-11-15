@@ -1,0 +1,16 @@
+# O projeto do Xcode é gerado pelo XcodeGen no CI a partir do project.yml
+*.xcodeproj
+*.xcworkspace
+# Gerado pelo XcodeGen a partir de "info.properties" do project.yml
+ScanLab/Info.plist
+
+# Saídas de build
+build/
+.build/
+DerivedData/
+Payload/
+*.ipa
+
+.DS_Store
+.swiftpm/
+xcuserdata/
