@@ -59,6 +59,9 @@ struct ScanDetailView: View {
     @State private var showRename = false
     @State private var draftName = ""
     @State private var showDeleteConfirmation = false
+    @State private var shareRequest: ShareRequest? = nil
+    @State private var isZipping = false
+    @State private var shareError: String? = nil
 
     private var scan: ScanMeta? {
         return store.scans.first { $0.id == scanID }
@@ -142,13 +145,28 @@ struct ScanDetailView: View {
                     Text("Nenhum arquivo gerado ainda.")
                         .foregroundStyle(.secondary)
                 } else {
+                    Button {
+                        shareZip(scanID: scan.id)
+                    } label: {
+                        HStack {
+                            Label("Compartilhar tudo em ZIP", systemImage: "doc.zipper")
+                            Spacer()
+                            if isZipping {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isZipping || job.isRunning)
+
                     ForEach(outputFiles, id: \.self) { file in
-                        ShareLink(item: file) {
+                        Button {
+                            share(file)
+                        } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(file.lastPathComponent)
                                         .font(.callout)
-                                    Text(AppPaths.formatBytes(AppPaths.fileSize(file)))
+                                    Text(fileDetail(file))
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
                                 }
@@ -156,12 +174,19 @@ struct ScanDetailView: View {
                                 Image(systemName: "square.and.arrow.up")
                             }
                         }
+                        .disabled(job.isRunning)
                     }
+                }
+
+                if let shareError = shareError {
+                    Label(shareError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
                 }
             } header: {
                 Text("Arquivos")
             } footer: {
-                Text("Toque em um arquivo para compartilhar. Eles também estão no app Arquivos, em No Meu iPad → ScanLab → Scans → \(scan.id) → outputs.")
+                Text("O ZIP leva todos os arquivos com os nomes originais; é o jeito mais seguro de mandar o OBJ, que precisa do .mtl ao lado. Eles também estão no app Arquivos, em No Meu iPad → ScanLab → Scans → \(scan.id) → outputs.")
             }
 
             Section {
@@ -193,6 +218,10 @@ struct ScanDetailView: View {
             Button("Cancelar", role: .cancel) {
             }
         }
+        .sheet(item: $shareRequest) { request in
+            ActivityView(urls: request.urls)
+                .presentationDetents([.medium, .large])
+        }
         .alert("Apagar este scan?", isPresented: $showDeleteConfirmation) {
             Button("Apagar", role: .destructive) {
                 store.delete(id: scan.id)
@@ -214,6 +243,59 @@ struct ScanDetailView: View {
                 .multilineTextAlignment(.trailing)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Compartilhamento
+
+    /// O `.mtl` que acompanha um `.obj` (mesmo nome, outra extensão), se existir.
+    private func materialFile(for file: URL) -> URL? {
+        guard file.pathExtension.lowercased() == "obj" else {
+            return nil
+        }
+        let material = file.deletingPathExtension().appendingPathExtension("mtl")
+        return FileManager.default.fileExists(atPath: material.path) ? material : nil
+    }
+
+    private func fileDetail(_ file: URL) -> String {
+        let size = AppPaths.formatBytes(AppPaths.fileSize(file))
+        if materialFile(for: file) != nil {
+            return "\(size) · vai junto com o .mtl"
+        }
+        return size
+    }
+
+    private func share(_ file: URL) {
+        shareError = nil
+        var urls = [file]
+        // O OBJ referencia o material pelo nome do arquivo: os dois precisam ir juntos.
+        if let material = materialFile(for: file) {
+            urls.append(material)
+        }
+        shareRequest = ShareRequest(urls: urls)
+    }
+
+    private func shareZip(scanID: String) {
+        if isZipping {
+            return
+        }
+        isZipping = true
+        shareError = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let zipURL = try ZipArchiver.zipOutputs(scanID: scanID)
+                DispatchQueue.main.async {
+                    isZipping = false
+                    shareRequest = ShareRequest(urls: [zipURL])
+                }
+            } catch {
+                let text = error.localizedDescription
+                AppLog.error(.export, "Falha ao gerar o ZIP do scan \(scanID): \(text)")
+                DispatchQueue.main.async {
+                    isZipping = false
+                    shareError = "Não foi possível gerar o ZIP: \(text)"
+                }
+            }
+        }
     }
 
     private func refreshFiles() {
