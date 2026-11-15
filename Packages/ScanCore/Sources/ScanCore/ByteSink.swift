@@ -80,6 +80,19 @@ struct ByteBuffer {
         }
     }
 
+    mutating func appendUInt16(_ value: UInt16) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { bytes in
+            data.append(contentsOf: bytes)
+        }
+    }
+
+    mutating func appendUInt16s(_ values: [UInt16]) {
+        values.withUnsafeBufferPointer { pointer in
+            data.append(pointer)
+        }
+    }
+
     mutating func appendInt32(_ value: Int32) {
         appendUInt32(UInt32(bitPattern: value))
     }
@@ -132,6 +145,15 @@ struct BinaryReader {
     mutating func readUInt32() throws -> UInt32 {
         let values = try readArray(count: 1, initial: UInt32(0))
         return UInt32(littleEndian: values[0])
+    }
+
+    mutating func readUInt16() throws -> UInt16 {
+        let values = try readArray(count: 1, initial: UInt16(0))
+        return UInt16(littleEndian: values[0])
+    }
+
+    mutating func readUInt16s(_ count: Int) throws -> [UInt16] {
+        return try readArray(count: count, initial: UInt16(0))
     }
 
     mutating func readFloats(_ count: Int) throws -> [Float] {
