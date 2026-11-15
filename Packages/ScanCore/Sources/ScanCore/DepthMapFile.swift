@@ -31,6 +31,65 @@ public struct DepthMap: Equatable {
         return result
     }
 
+    /// Superfície mais próxima da câmera numa janela de 3 x 3 pixels em torno do ponto
+    /// dado em frações da imagem (0 a 1, origem no canto superior esquerdo).
+    ///
+    /// Usamos o MÍNIMO da vizinhança, e não o pixel central, de propósito: a pose da
+    /// câmera e o mapa de profundidade nunca alinham perfeitamente, e na borda de um
+    /// objeto o pixel central pode cair no fundo. Pegando o mais próximo, a silhueta do
+    /// objeto da frente "engorda" um pixel e a cor dele não vaza para a parede atrás.
+    ///
+    /// - Parameter minConfidence: pixels com confiança abaixo disso são ignorados
+    ///   (só vale se o mapa tiver confiança).
+    /// - Returns: profundidade em metros, ou `nil` se não houver medida confiável ali.
+    public func nearestSurface(columnFraction: Float, rowFraction: Float, minConfidence: UInt8) -> Float? {
+        if width <= 0 || height <= 0 {
+            return nil
+        }
+        let centerColumn = Int(columnFraction * Float(width))
+        let centerRow = Int(rowFraction * Float(height))
+        let hasConfidence = confidence.count == depthMillimeters.count
+
+        var nearest: UInt16 = 0
+        for row in (centerRow - 1)...(centerRow + 1) {
+            if row < 0 || row >= height {
+                continue
+            }
+            for column in (centerColumn - 1)...(centerColumn + 1) {
+                if column < 0 || column >= width {
+                    continue
+                }
+                let index = row * width + column
+                let value = depthMillimeters[index]
+                if value == 0 {
+                    continue
+                }
+                if hasConfidence && confidence[index] < minConfidence {
+                    continue
+                }
+                if nearest == 0 || value < nearest {
+                    nearest = value
+                }
+            }
+        }
+        if nearest == 0 {
+            return nil
+        }
+        return Float(nearest) / 1000
+    }
+
+    /// Fração dos pixels que têm medida (útil para saber se o LiDAR estava coberto).
+    public var validFraction: Float {
+        if depthMillimeters.isEmpty {
+            return 0
+        }
+        var valid = 0
+        for value in depthMillimeters where value != 0 {
+            valid += 1
+        }
+        return Float(valid) / Float(depthMillimeters.count)
+    }
+
     /// Profundidade em metros no pixel (coluna, linha). `nil` se fora do mapa ou sem medida.
     public func meters(column: Int, row: Int) -> Float? {
         if column < 0 || row < 0 || column >= width || row >= height {

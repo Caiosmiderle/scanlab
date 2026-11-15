@@ -234,7 +234,7 @@ final class VertexColorizerTests: XCTestCase {
 
         let assignment = VertexColorizer.assignKeyframes(mesh: mesh, cameras: cameras)
         // A câmera de baixo está mais perto, mas vê a superfície por trás: não pode ganhar.
-        XCTAssertEqual(assignment, [0, 0, 0, 0])
+        XCTAssertEqual(assignment.bestCameras, [0, 0, 0, 0])
 
         let report = VertexColorizer.colorize(mesh: &mesh, cameras: cameras) { index in
             return images[index]
@@ -277,13 +277,14 @@ final class VertexColorizerTests: XCTestCase {
 
     func testNoCamerasLeavesEverythingUnassigned() {
         let assignment = VertexColorizer.assignKeyframes(mesh: floorMesh(), cameras: [])
-        XCTAssertEqual(assignment, [-1, -1, -1, -1])
+        XCTAssertEqual(assignment.bestCameras, [-1, -1, -1, -1])
     }
 
     func testGrazingAngleIsRejected() {
         // Câmera quase rente ao piso: o cosseno com a normal fica abaixo do mínimo.
         let camera = TestCameras.camera(transform: TestCameras.lookingDown(from: SIMD3<Float>(5.5, 0.1, 0.5)))
         let value = VertexColorizer.score(camera: camera,
+                                          depthMap: nil,
                                           point: SIMD3<Float>(0.5, 0, 0.5),
                                           normal: SIMD3<Float>(0, 1, 0),
                                           options: ColorizeOptions())
