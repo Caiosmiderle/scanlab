@@ -14,9 +14,34 @@ SceneKit, Metal). Interface, textos e identidade próprios.
 
 | Marco | Conteúdo | Situação |
 |---|---|---|
-| M0 | Pipeline código → CI → `.ipa` → sideload, tela com status do LiDAR | em teste |
-| M1 | Captura da malha LiDAR, export PLY e OBJ | a fazer |
-| M2 a M10 | Cor, RoomPlan, biblioteca, viewer, exportações, processamento, editor, medição | a fazer |
+| M0 | Pipeline código → CI → `.ipa` → sideload, tela com status do LiDAR | aceito (iPad Pro M2 e iPhone 15 Pro, sistema 27) |
+| M1 | Captura da malha LiDAR, bruto `mesh.bin`, export PLY e OBJ, biblioteca básica, logs | em teste |
+| M2 a M10 | Cor, RoomPlan, biblioteca completa, viewer, exportações, processamento, editor, medição | a fazer |
+
+## Como usar (M1)
+
+1. Aba **Capturar** → **Iniciar**. Na primeira vez o iPad pede permissão de câmera.
+2. Ande devagar pelo ambiente. A malha aparece desenhada por cima da câmera; o topo da tela mostra tempo, blocos de malha, triângulos e temperatura.
+3. **Finalizar** grava o bruto e gera PLY e OBJ. **Pausar** segura a sessão; **Cancelar** descarta.
+4. Aba **Biblioteca** → toque no scan para ver os dados, gerar de novo com outro eixo, compartilhar ou apagar.
+5. Aba **Ajustes** → eixo padrão de exportação, diagnóstico e **Logs** (com botão de exportar o arquivo).
+
+O que é gravado para cada scan, em `Documents/Scans/<id>/`:
+
+| Arquivo | Conteúdo |
+|---|---|
+| `meta.json` | nome, data, aparelho, versão do app, contagens |
+| `mesh.bin` | malha bruta do LiDAR, por bloco, no formato próprio `SLMESH01` (nunca é sobrescrita) |
+| `outputs/scan-<id>-zup.ply` | malha em PLY binário, com normais e classificação por face |
+| `outputs/scan-<id>-zup.obj` + `.mtl` | a mesma malha em OBJ |
+
+O sufixo é `zup` (Z para cima, padrão de CAD e CloudCompare) ou `yup` (Y para cima, como no ARKit).
+A conversão é `(x, y, z) → (x, -z, y)`.
+
+## Princípios de interface
+
+- iPad primeiro, funciona no iPhone. Tema escuro, textos em português, ícones SF Symbols.
+- **Apple Pencil:** todo controle precisa funcionar bem com o Pencil, não só com o dedo. Alvos de toque de pelo menos 44 pt, efeito de hover nos botões (o iPad Pro M2 mostra o hover do Pencil) e campos de texto que aceitam escrita à mão. Nas telas de precisão que ainda vêm (visualizador, editor de corte, medição), o Pencil é a ferramenta principal de apontar.
 
 ## Como o app é compilado
 
@@ -81,8 +106,13 @@ A pasta **Documents** do app aparece no app **Arquivos** do iPad, em
 ```
 project.yml                    definição do projeto (XcodeGen)
 Packages/ScanCore/             lógica testável, só Foundation e simd
-ScanLab/App/                   ponto de entrada e tela inicial
-ScanLab/Support/               utilitários (LiDAR, dados do aparelho)
+                               (mesh.bin, PLY, OBJ, eixos, montagem da malha)
+ScanLab/App/                   ponto de entrada e abas
+ScanLab/Capture/               sessão ARKit, leitura da malha, HUD
+ScanLab/Library/               lista de scans, detalhe, armazenamento em disco
+ScanLab/Export/                geração dos arquivos de saída
+ScanLab/Support/               logs, caminhos, ajustes, LiDAR, estado térmico
+ScanLab/Resources/             ícone do app
 .github/workflows/             CI que gera o .ipa
 ```
 
