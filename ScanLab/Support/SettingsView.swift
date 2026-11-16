@@ -5,6 +5,7 @@ import ScanCore
 struct SettingsView: View {
     @AppStorage(SettingsKeys.exportUpAxis) private var axisRaw: String = UpAxis.zUp.rawValue
     @AppStorage(SettingsKeys.colorizeOnExport) private var colorizeOnExport: Bool = true
+    @AppStorage(SettingsKeys.useOcclusion) private var useOcclusion: Bool = true
     @AppStorage(SettingsKeys.saveDepth) private var saveDepth: Bool = true
     @AppStorage(SettingsKeys.keyframeInterval) private var keyframeInterval: Double = AppSettings.defaultKeyframeInterval
     @AppStorage(SettingsKeys.keyframeDistanceCm) private var keyframeDistanceCm: Double = AppSettings.defaultKeyframeDistanceCm
@@ -23,8 +24,10 @@ struct SettingsView: View {
                 } header: {
                     Text("Exportação")
                     Toggle("Colorir a malha com as fotos", isOn: $colorizeOnExport)
+                    Toggle("Testar oclusão com a profundidade", isOn: $useOcclusion)
+                        .disabled(!colorizeOnExport)
                 } footer: {
-                    Text("Usado nos arquivos gerados ao finalizar um scan. Dá para gerar de novo com outro eixo na tela do scan.")
+                    Text("Usado nos arquivos gerados ao finalizar um scan. Dá para gerar de novo, com outro eixo ou outra opção, na tela do scan. O teste de oclusão evita que um objeto pegue a cor do que está na frente dele.")
                 }
 
                 Section {

@@ -30,9 +30,30 @@ enum ColorProcessor {
             return nil
         }
 
+        // Mapas de profundidade para o teste de oclusão (M2B). Cada um tem cerca de
+        // 100 KB em memória, então dá para carregar todos de uma vez.
+        var depthMaps: [DepthMap?] = []
+        var depthLoaded = 0
+        if AppSettings.useOcclusion {
+            for record in records {
+                var map: DepthMap? = nil
+                if let depthFile = record.depthFile,
+                   let depthData = try? Data(contentsOf: folder.appendingPathComponent(depthFile)) {
+                    map = try? DepthMapFile.decode(depthData)
+                }
+                if map != nil {
+                    depthLoaded += 1
+                }
+                depthMaps.append(map)
+            }
+            if depthLoaded == 0 {
+                depthMaps = []
+            }
+        }
+
         let started = Date()
         var missingImages = 0
-        let report = VertexColorizer.colorize(mesh: &mesh, cameras: cameras, imageProvider: { index in
+        let report = VertexColorizer.colorize(mesh: &mesh, cameras: cameras, depthMaps: depthMaps, imageProvider: { index in
             let url = folder.appendingPathComponent(records[index].imageFile)
             let image = ImageDecoder.loadRGBA(url: url, maxPixelSize: decodeSize)
             if image == nil {
@@ -42,7 +63,7 @@ enum ColorProcessor {
         }, progress: progress)
 
         let seconds = Date().timeIntervalSince(started)
-        AppLog.info(.processing, "Coloração do scan \(scanID): keyframes=\(cameras.count) usados=\(report.framesUsed) vértices coloridos=\(report.coloredDirectly) preenchidos pelos vizinhos=\(report.filledFromNeighbors) sem cor=\(report.uncolored) imagens ilegíveis=\(missingImages) tempo=\(String(format: "%.1f", seconds))s")
+        AppLog.info(.processing, "Coloração do scan \(scanID): keyframes=\(cameras.count) mapas de profundidade=\(depthLoaded) oclusão=\(depthMaps.isEmpty ? "não" : "sim") usados=\(report.framesUsed) vértices coloridos=\(report.coloredDirectly) preenchidos pelos vizinhos=\(report.filledFromNeighbors) sem cor=\(report.uncolored) imagens ilegíveis=\(missingImages) tempo=\(String(format: "%.1f", seconds))s")
         return report
     }
 }

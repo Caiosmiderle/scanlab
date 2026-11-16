@@ -67,6 +67,8 @@ enum SettingsKeys {
     static let exportUpAxis = "exportUpAxis"
     /// Colorir a malha com os keyframes ao exportar.
     static let colorizeOnExport = "colorizeOnExport"
+    /// Usar o mapa de profundidade para descartar fotos que não enxergam o vértice.
+    static let useOcclusion = "useOcclusion"
     /// Salvar o mapa de profundidade junto de cada keyframe.
     static let saveDepth = "saveDepth"
     static let keyframeInterval = "keyframeInterval"
@@ -110,5 +112,9 @@ enum AppSettings {
 
     static var colorizeOnExport: Bool {
         return bool(SettingsKeys.colorizeOnExport, true)
+    }
+
+    static var useOcclusion: Bool {
+        return bool(SettingsKeys.useOcclusion, true)
     }
 }
