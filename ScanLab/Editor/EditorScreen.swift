@@ -59,6 +59,12 @@ struct EditorScreen: View {
     @State private var loadError: String? = nil
     @State private var isWorking = false
     @State private var notice: String? = nil
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    /// Tela estreita (iPhone em pé, iPad em tela dividida): controles mais enxutos.
+    private var isCompact: Bool {
+        return horizontalSizeClass == .compact
+    }
 
     /// Blocos da malha no estado atual da edição.
     @State private var anchors: [MeshAnchorData] = []
@@ -166,7 +172,7 @@ struct EditorScreen: View {
     // MARK: - Controles
 
     private var viewControls: some View {
-        HStack(spacing: 8) {
+        FlowLayout(spacing: 8, lineSpacing: 8) {
             viewButton("Frente") {
                 controller.show(.front, orthographic: orthographic)
             }
@@ -200,16 +206,19 @@ struct EditorScreen: View {
 
     private var editPanel: some View {
         VStack(spacing: 10) {
-            HStack {
-                Text("\(faceCount) de \(originalFaceCount) triângulos")
-                    .font(.callout.monospacedDigit())
-                Spacer()
-                Text("Arraste as bolinhas para mover as faces da caixa")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    faceCountText
+                    Spacer()
+                    dragHint
+                }
+                VStack(spacing: 2) {
+                    faceCountText
+                    dragHint
+                }
             }
 
-            HStack(spacing: 10) {
+            FlowLayout(spacing: 10, lineSpacing: 8) {
                 actionButton("Apagar dentro", icon: "minus.square.fill", prominent: true) {
                     cut(removeInside: true)
                 }
@@ -233,12 +242,16 @@ struct EditorScreen: View {
             .disabled(isWorking)
 
             DisclosureGroup("Ajuste fino da caixa", isExpanded: $showFineTune) {
-                VStack(spacing: 6) {
-                    axisSliders("X", axis: 0)
-                    axisSliders("Y (altura)", axis: 1)
-                    axisSliders("Z", axis: 2)
+                if isCompact {
+                    // No iPhone os controles ficam empilhados e rolam, para o painel não
+                    // cobrir a tela inteira.
+                    ScrollView {
+                        fineTuneSliders
+                    }
+                    .frame(maxHeight: 230)
+                } else {
+                    fineTuneSliders
                 }
-                .padding(.top, 6)
             }
             .font(.callout)
         }
@@ -247,9 +260,37 @@ struct EditorScreen: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 
+    private var faceCountText: some View {
+        Text("\(faceCount) de \(originalFaceCount) triângulos")
+            .font(.callout.monospacedDigit())
+    }
+
+    private var dragHint: some View {
+        Text("Arraste as bolinhas para mover as faces da caixa")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+    }
+
+    private var fineTuneSliders: some View {
+        VStack(spacing: isCompact ? 10 : 6) {
+            axisSliders("X", axis: 0)
+            axisSliders("Y (altura)", axis: 1)
+            axisSliders("Z", axis: 2)
+        }
+        .padding(.top, 6)
+    }
+
     private func actionButton(_ title: String, icon: String, prominent: Bool, action: @escaping () -> Void) -> some View {
         Group {
-            if prominent {
+            if isCompact && !prominent {
+                // No iPhone os botões secundários ficam só com o ícone.
+                Button(action: action) {
+                    Image(systemName: icon)
+                        .frame(minWidth: 36, minHeight: 36)
+                }
+                .buttonStyle(.bordered)
+            } else if prominent {
                 Button(action: action) {
                     Label(title, systemImage: icon)
                         .frame(minHeight: 36)
@@ -287,19 +328,38 @@ struct EditorScreen: View {
                 boxMax = updated
             }
         )
-        return HStack(spacing: 10) {
-            Text(title)
-                .frame(width: 80, alignment: .leading)
-            Text(FloorPlanSVG.formatMeters(boxMin[axis]))
-                .font(.caption.monospacedDigit())
-                .frame(width: 44)
-            Slider(value: minBinding, in: lower...upper)
-                .accessibilityLabel("Início da caixa em \(title)")
-            Slider(value: maxBinding, in: lower...upper)
-                .accessibilityLabel("Fim da caixa em \(title)")
-            Text(FloorPlanSVG.formatMeters(boxMax[axis]))
-                .font(.caption.monospacedDigit())
-                .frame(width: 44)
+        return Group {
+            if isCompact {
+                // iPhone: título e valores numa linha, um controle por linha embaixo.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(title)
+                        Spacer()
+                        Text("\(FloorPlanSVG.formatMeters(boxMin[axis])) a \(FloorPlanSVG.formatMeters(boxMax[axis])) m")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: minBinding, in: lower...upper)
+                        .accessibilityLabel("Início da caixa em \(title)")
+                    Slider(value: maxBinding, in: lower...upper)
+                        .accessibilityLabel("Fim da caixa em \(title)")
+                }
+            } else {
+                HStack(spacing: 10) {
+                    Text(title)
+                        .frame(width: 80, alignment: .leading)
+                    Text(FloorPlanSVG.formatMeters(boxMin[axis]))
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 44)
+                    Slider(value: minBinding, in: lower...upper)
+                        .accessibilityLabel("Início da caixa em \(title)")
+                    Slider(value: maxBinding, in: lower...upper)
+                        .accessibilityLabel("Fim da caixa em \(title)")
+                    Text(FloorPlanSVG.formatMeters(boxMax[axis]))
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 44)
+                }
+            }
         }
     }
 

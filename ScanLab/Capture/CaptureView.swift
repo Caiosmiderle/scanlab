@@ -5,6 +5,18 @@ import UIKit
 struct CaptureView: View {
     @StateObject private var controller = CaptureController()
     @State private var showCancelConfirmation = false
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    /// Tela estreita (iPhone em pé, iPad em tela dividida): botões só com ícone.
+    private var isCompact: Bool {
+        return horizontalSizeClass == .compact
+    }
+
+    /// Tela baixa (iPhone deitado): o cartão inicial esconde as dicas para caber.
+    private var isShort: Bool {
+        return verticalSizeClass == .compact
+    }
 
     private let tips = [
         "Mova o aparelho devagar",
@@ -80,7 +92,8 @@ struct CaptureView: View {
     // MARK: - HUD
 
     private var hud: some View {
-        HStack(spacing: 16) {
+        // No iPhone os itens não cabem numa linha: o arranjo quebra em duas.
+        FlowLayout(spacing: isCompact ? 12 : 16, lineSpacing: 6) {
             hudItem(icon: "timer", text: formatDuration(controller.elapsedSeconds), label: "Tempo de scan")
             hudItem(icon: "square.grid.3x3", text: "\(controller.anchorCount)", label: "Blocos de malha")
             hudItem(icon: "triangle", text: formatCount(controller.triangleCount), label: "Triângulos")
@@ -93,10 +106,10 @@ struct CaptureView: View {
                 hudItem(icon: "memorychip", text: "Memória baixa", label: "Aviso de memória", highlighted: true)
             }
         }
-        .font(.callout.monospacedDigit())
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: Capsule())
+        .font((isCompact ? Font.footnote : Font.callout).monospacedDigit())
+        .padding(.horizontal, isCompact ? 12 : 16)
+        .padding(.vertical, isCompact ? 8 : 10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
     }
 
     private func hudItem(icon: String, text: String, label: String, highlighted: Bool = false) -> some View {
@@ -113,10 +126,12 @@ struct CaptureView: View {
 
     private var idleCard: some View {
         VStack(spacing: 12) {
-            Image(systemName: "viewfinder")
-                .font(.system(size: 56))
-                .foregroundStyle(.tint)
-                .accessibilityHidden(true)
+            if !isShort {
+                Image(systemName: "viewfinder")
+                    .font(.system(size: isCompact ? 44 : 56))
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+            }
 
             Text("Pronto para escanear")
                 .font(.title2)
@@ -130,7 +145,7 @@ struct CaptureView: View {
                 Text("Veja o scan na aba Biblioteca.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-            } else {
+            } else if !isShort {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(tips, id: \.self) { tip in
                         Label(tip, systemImage: "lightbulb")
@@ -145,7 +160,7 @@ struct CaptureView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
-        .padding(24)
+        .padding(isCompact ? 18 : 24)
         .frame(maxWidth: 520)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
     }
@@ -157,11 +172,12 @@ struct CaptureView: View {
         let tipIndex = Int(controller.elapsedSeconds / 6) % tips.count
         let text = tracking ?? tips[tipIndex]
         return Label(text, systemImage: tracking == nil ? "lightbulb" : "exclamationmark.triangle.fill")
-            .font(.callout)
+            .font(isCompact ? .footnote : .callout)
             .foregroundStyle(tracking == nil ? Color.primary : Color.orange)
+            .multilineTextAlignment(.center)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: Capsule())
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
     }
 
     private var savingCard: some View {
@@ -188,7 +204,7 @@ struct CaptureView: View {
                 controller.start()
             }
         case .scanning:
-            HStack(spacing: 16) {
+            HStack(spacing: isCompact ? 10 : 16) {
                 smallButton(title: "Cancelar", icon: "xmark") {
                     showCancelConfirmation = true
                 }
@@ -200,7 +216,7 @@ struct CaptureView: View {
                 }
             }
         case .paused:
-            HStack(spacing: 16) {
+            HStack(spacing: isCompact ? 10 : 16) {
                 smallButton(title: "Cancelar", icon: "xmark") {
                     showCancelConfirmation = true
                 }
@@ -222,7 +238,7 @@ struct CaptureView: View {
         Button(action: action) {
             Label(title, systemImage: icon)
                 .font(.title3.weight(.semibold))
-                .frame(minWidth: 150, minHeight: 44)
+                .frame(minWidth: isCompact ? 130 : 150, minHeight: 44)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
         }
@@ -235,11 +251,18 @@ struct CaptureView: View {
 
     private func smallButton(title: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.body.weight(.medium))
-                .frame(minWidth: 96, minHeight: 44)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+            // No iPhone só o ícone, para os três botões caberem lado a lado.
+            Group {
+                if isCompact {
+                    Image(systemName: icon)
+                } else {
+                    Label(title, systemImage: icon)
+                }
+            }
+            .font(.body.weight(.medium))
+            .frame(minWidth: isCompact ? 50 : 96, minHeight: 44)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.capsule)

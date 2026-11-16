@@ -34,6 +34,7 @@ struct RoomScanView: View {
 private struct RoomScanSupportedView: View {
     @StateObject private var controller = RoomScanController()
     @State private var showDiscardConfirmation = false
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
         ZStack {
@@ -154,17 +155,22 @@ private struct RoomScanSupportedView: View {
 
     private var reviewCard: some View {
         VStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(controller.rooms) { result in
-                    RoomSummaryRow(summary: result.summary)
+            // Com vários cômodos a lista pode passar da altura da tela (iPhone): nesse
+            // caso ela rola dentro do cartão.
+            ViewThatFits(in: .vertical) {
+                roomList
+                ScrollView {
+                    roomList
                 }
+                .frame(maxHeight: verticalSizeClass == .compact ? 120 : 260)
             }
 
             Text("Medidas aproximadas: confira com a trena.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 12) {
+            // Quebra em duas linhas quando não cabe (iPhone).
+            FlowLayout(spacing: 12, lineSpacing: 10) {
                 smallButton(title: "Descartar", icon: "trash") {
                     showDiscardConfirmation = true
                 }
@@ -179,6 +185,14 @@ private struct RoomScanSupportedView: View {
         .padding(20)
         .frame(maxWidth: 640)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+    }
+
+    private var roomList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(controller.rooms) { result in
+                RoomSummaryRow(summary: result.summary)
+            }
+        }
     }
 
     // MARK: - Botões (alvos de 44 pt e hover, para dedo e Apple Pencil)
@@ -221,10 +235,14 @@ struct RoomSummaryRow: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(summary.name)
                 .font(.headline)
-            HStack(spacing: 16) {
-                measure(icon: "square.dashed", label: "Área", value: areaText)
-                measure(icon: "ruler", label: "Perímetro", value: "\(FloorPlanSVG.formatMeters(Float(summary.perimeter))) m")
-                measure(icon: "arrow.up.and.down", label: "Pé-direito", value: heightText)
+            // Lado a lado quando cabe; um embaixo do outro numa tela estreita.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) {
+                    measures
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    measures
+                }
             }
             .font(.callout)
             Text("\(summary.wallCount) paredes · \(summary.doorCount) portas · \(summary.windowCount) janelas")
@@ -232,6 +250,13 @@ struct RoomSummaryRow: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var measures: some View {
+        measure(icon: "square.dashed", label: "Área", value: areaText)
+        measure(icon: "ruler", label: "Perímetro", value: "\(FloorPlanSVG.formatMeters(Float(summary.perimeter))) m")
+        measure(icon: "arrow.up.and.down", label: "Pé-direito", value: heightText)
     }
 
     private var areaText: String {

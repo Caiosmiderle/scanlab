@@ -8,7 +8,13 @@ struct ScanViewerScreen: View {
     let scanName: String
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var controller = ViewerSceneController()
+
+    /// Tela estreita (iPhone em pé, iPad em tela dividida): controles mais enxutos.
+    private var isCompact: Bool {
+        return horizontalSizeClass == .compact
+    }
 
     // Carregamento
     @State private var isLoading = true
@@ -210,7 +216,61 @@ struct ScanViewerScreen: View {
 
     // MARK: - Controles de cima
 
+    @ViewBuilder
     private var topControls: some View {
+        if isCompact {
+            compactTopControls
+        } else {
+            regularTopControls
+        }
+    }
+
+    /// iPhone: os quatro modos e um botão que abre projeção e vistas rápidas num menu.
+    /// Assim os controles ocupam uma linha só e não cobrem o modelo.
+    private var compactTopControls: some View {
+        HStack(spacing: 8) {
+            Picker("Modo", selection: $mode) {
+                ForEach(ViewerMode.allCases) { item in
+                    Text(item.title).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if !isWalking {
+                Menu {
+                    Picker("Projeção", selection: $projection) {
+                        ForEach(ViewerProjection.allCases) { item in
+                            Text(item.title).tag(item)
+                        }
+                    }
+                    if projection != .plan {
+                        Divider()
+                        Button("Vista de topo") {
+                            controller.show(.top)
+                        }
+                        Button("Vista de frente") {
+                            controller.show(.front)
+                        }
+                        Button("Vista de lado") {
+                            controller.show(.side)
+                        }
+                        Button("Vista 3D") {
+                            controller.show(.isometric)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "camera.viewfinder")
+                        .font(.title3)
+                        .frame(minWidth: 44, minHeight: 36)
+                }
+                .accessibilityLabel("Projeção e vistas")
+            }
+        }
+        .padding(8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var regularTopControls: some View {
         VStack(spacing: 8) {
             Picker("Modo", selection: $mode) {
                 ForEach(ViewerMode.allCases) { item in
@@ -266,7 +326,8 @@ struct ScanViewerScreen: View {
     // MARK: - Informações e controles de baixo
 
     private var bottomInfo: some View {
-        HStack {
+        // No iPhone o aviso vai para baixo das medidas, em vez de ao lado.
+        FlowLayout(spacing: 12, lineSpacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(dimensionsText)
                     .font(.callout.monospacedDigit())
@@ -278,11 +339,10 @@ struct ScanViewerScreen: View {
             .padding(.vertical, 8)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
 
-            Spacer()
-
             if let notice = notice {
                 Text(notice)
-                    .font(.callout)
+                    .font(isCompact ? .footnote : .callout)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
@@ -290,7 +350,37 @@ struct ScanViewerScreen: View {
         }
     }
 
+    @ViewBuilder
     private var planControls: some View {
+        if isCompact {
+            // iPhone: texto e botão numa linha, o controle de altura embaixo, largo.
+            VStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "scissors")
+                        .accessibilityHidden(true)
+                    Text("Corte a \(FloorPlanSVG.formatMeters(planCutHeight)) m do piso")
+                        .font(.footnote.monospacedDigit())
+                    Spacer()
+                    Button {
+                        savePlanImage()
+                    } label: {
+                        Label("PNG", systemImage: "photo")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isBusy)
+                }
+                Slider(value: $planCutHeight, in: 0.3...max(0.4, modelHeight), step: 0.05)
+                    .accessibilityLabel("Altura do corte da planta")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        } else {
+            regularPlanControls
+        }
+    }
+
+    private var regularPlanControls: some View {
         HStack(spacing: 12) {
             Image(systemName: "scissors")
                 .accessibilityHidden(true)
@@ -317,38 +407,39 @@ struct ScanViewerScreen: View {
             joystick
             Spacer()
             VStack(alignment: .trailing, spacing: 8) {
-                Text("Altura dos olhos: \(FloorPlanSVG.formatMeters(eyeHeight)) m")
-                    .font(.callout.monospacedDigit())
+                Text("Olhos a \(FloorPlanSVG.formatMeters(eyeHeight)) m")
+                    .font((isCompact ? Font.footnote : Font.callout).monospacedDigit())
                 Slider(value: $eyeHeight, in: 1.0...2.0, step: 0.05)
-                    .frame(width: 220)
+                    .frame(maxWidth: 220)
                     .accessibilityLabel("Altura dos olhos")
                 Text("Arraste na tela para olhar em volta")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
                 Button {
                     controller.stopWalking()
                     isWalking = false
                     projection = .perspective
                 } label: {
-                    Label("Sair da caminhada", systemImage: "xmark.circle.fill")
+                    Label(isCompact ? "Sair" : "Sair da caminhada", systemImage: "xmark.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
             }
-            .padding(12)
+            .padding(isCompact ? 10 : 12)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
         }
     }
 
     /// Joystick virtual: arrastar o botão do centro move a pessoa.
     private var joystick: some View {
-        let radius: CGFloat = 60
+        let radius: CGFloat = isCompact ? 48 : 60
         return ZStack {
             Circle()
                 .fill(.ultraThinMaterial)
                 .frame(width: radius * 2, height: radius * 2)
             Circle()
                 .fill(Color.accentColor)
-                .frame(width: 52, height: 52)
+                .frame(width: isCompact ? 44 : 52, height: isCompact ? 44 : 52)
                 .offset(joystickOffset)
         }
         .contentShape(Circle())
@@ -377,7 +468,7 @@ struct ScanViewerScreen: View {
     // MARK: - Barra inferior
 
     private var bottomBar: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: isCompact ? 0 : 4) {
             barButton("Apagar", icon: "trash", role: .destructive) {
                 showDeleteConfirmation = true
             }
@@ -419,7 +510,7 @@ struct ScanViewerScreen: View {
             Button {
                 toggleMeasuring()
             } label: {
-                barLabel(measureTool == nil ? "Medir" : "Sair da medição", icon: measureTool == nil ? "ruler" : "ruler.fill")
+                barLabel(measureTool == nil ? "Medir" : "Sair", icon: measureTool == nil ? "ruler" : "ruler.fill")
             }
             .hoverEffect(.highlight)
             .disabled(isWalking)
@@ -439,11 +530,16 @@ struct ScanViewerScreen: View {
         VStack(spacing: 2) {
             Image(systemName: icon)
                 .font(.title3)
-            Text(title)
-                .font(.caption2)
+            // No iPhone o texto some: seis botões com legenda não cabem na largura.
+            // O nome continua disponível para o VoiceOver.
+            if !isCompact {
+                Text(title)
+                    .font(.caption2)
+            }
         }
-        .frame(minWidth: 64, minHeight: 44)
+        .frame(minWidth: isCompact ? 46 : 64, minHeight: 44)
         .contentShape(Rectangle())
+        .accessibilityLabel(title)
     }
 
     private func barButton(_ title: String, icon: String, role: ButtonRole?, action: @escaping () -> Void) -> some View {
@@ -460,7 +556,7 @@ struct ScanViewerScreen: View {
 
     private var measurePanel: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 12) {
+            FlowLayout(spacing: 12, lineSpacing: 8) {
                 Picker("Ferramenta", selection: Binding(get: { measureTool ?? .distance }, set: { tool in
                     measureTool = tool
                     pendingPoints = []
@@ -481,7 +577,7 @@ struct ScanViewerScreen: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            HStack(spacing: 10) {
+            FlowLayout(spacing: 10, lineSpacing: 8) {
                 if measureTool == .area {
                     Button {
                         finishArea()
