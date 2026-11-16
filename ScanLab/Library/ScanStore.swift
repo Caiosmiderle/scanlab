@@ -19,6 +19,34 @@ struct ScanMeta: Codable, Identifiable, Equatable {
     var status: String
     /// Quantos keyframes foram salvos. Opcional: scans feitos antes do M2 não têm o campo.
     var keyframeCount: Int?
+    /// Tipo do item: `ScanKind.mesh` (malha LiDAR) ou `ScanKind.room` (RoomPlan).
+    /// Opcional: itens antigos não têm o campo e são malha.
+    var kind: String?
+    /// Resumo dos cômodos de um item do RoomPlan.
+    var rooms: [RoomSummary]?
+
+    var isRoomScan: Bool {
+        return kind == ScanKind.room
+    }
+}
+
+enum ScanKind {
+    static let mesh = "malha"
+    static let room = "comodo"
+}
+
+/// Medidas aproximadas de um cômodo capturado com o RoomPlan.
+struct RoomSummary: Codable, Equatable {
+    var name: String
+    /// m²; `nil` se o contorno do cômodo não fechou.
+    var area: Double?
+    /// Soma do comprimento das paredes, em metros.
+    var perimeter: Double
+    /// Pé-direito aproximado (média da altura das paredes), em metros.
+    var ceilingHeight: Double?
+    var wallCount: Int
+    var doorCount: Int
+    var windowCount: Int
 }
 
 enum ScanStoreError: Error, LocalizedError {
@@ -175,6 +203,16 @@ final class ScanStore: ObservableObject {
             try? FileManager.default.removeItem(at: folder)
             throw error
         }
+    }
+
+    /// Cria uma pasta de scan vazia (com `outputs/`) e devolve o identificador.
+    /// Usado pelo RoomPlan, que grava os próprios arquivos e depois o `meta.json`.
+    /// Enquanto o `meta.json` não existir, a pasta não aparece na biblioteca.
+    func prepareScanFolder() throws -> String {
+        let id = makeUniqueID(for: Date())
+        try AppPaths.ensureDirectory(directory(for: id))
+        try AppPaths.ensureDirectory(outputsDirectory(for: id))
+        return id
     }
 
     func saveMeta(_ meta: ScanMeta) throws {
