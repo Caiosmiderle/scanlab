@@ -137,6 +137,33 @@ final class FloorPlanTests: XCTestCase {
         XCTAssertTrue(svg.contains("Planta vazia"))
     }
 
+    /// Gera uma planta de exemplo em arquivo quando a variável SCANLAB_SAMPLE_DIR está
+    /// definida. O CI publica esse arquivo como artifact, para dar para ver a planta
+    /// desenhada sem precisar de um aparelho.
+    func testWritesSampleFloorPlan() throws {
+        let living = rectangularRoom()
+        // Quarto de 3 m x 3 m encostado na parede direita da sala, com um vão entre os dois.
+        let bedroom = PlanRoom(name: "Quarto",
+                               walls: [segment(4, 0, 7, 0), segment(7, 0, 7, 3), segment(7, 3, 4, 3), segment(4, 3, 4, 0)],
+                               openings: [PlanOpening(kind: .opening, segment: segment(4, 2.1, 4, 2.9)),
+                                          PlanOpening(kind: .window, segment: segment(5, 3, 6.2, 3))],
+                               ceilingHeight: 2.6)
+        // Banheiro inclinado, para conferir as cotas em paredes que não são retas na folha.
+        let bath = PlanRoom(name: "Banheiro",
+                            walls: [segment(0, 3.4, 1.8, 4.2), segment(1.8, 4.2, 1.2, 5.6), segment(1.2, 5.6, -0.6, 4.8), segment(-0.6, 4.8, 0, 3.4)],
+                            openings: [PlanOpening(kind: .door, segment: segment(0.5, 3.62, 1.2, 3.93))])
+        let svg = FloorPlanSVG.render(rooms: [living, bedroom, bath], options: FloorPlanOptions(title: "Planta de exemplo"))
+        XCTAssertTrue(svg.contains(">Quarto</text>"))
+        XCTAssertTrue(svg.contains(">9,00 m²</text>"))
+
+        guard let directory = ProcessInfo.processInfo.environment["SCANLAB_SAMPLE_DIR"], !directory.isEmpty else {
+            return
+        }
+        let folder = URL(fileURLWithPath: directory, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data(svg.utf8).write(to: folder.appendingPathComponent("planta-exemplo.svg"))
+    }
+
     func testRoomIsCodable() throws {
         let room = rectangularRoom()
         let data = try JSONEncoder().encode(room)

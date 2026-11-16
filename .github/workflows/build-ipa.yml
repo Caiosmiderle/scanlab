@@ -30,7 +30,16 @@ jobs:
           swift --version
 
       - name: Testes do ScanCore
+        env:
+          # Os testes gravam aqui arquivos de exemplo (planta SVG) para conferência visual.
+          SCANLAB_SAMPLE_DIR: ${{ github.workspace }}/amostras
         run: swift test --package-path Packages/ScanCore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScanLab-amostras
+          path: amostras
+          if-no-files-found: warn
 
       - name: Instalar XcodeGen
         run: brew install xcodegen
