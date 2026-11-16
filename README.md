@@ -18,8 +18,70 @@ SceneKit, Metal). Interface, textos e identidade próprios.
 | M1 | Captura da malha LiDAR, bruto `mesh.bin`, export PLY e OBJ, biblioteca básica, logs | aceito |
 | M2A | Keyframes (foto + pose) durante o scan e cor por vértice no PLY e no OBJ | aceito |
 | M2B | Teste de oclusão com o mapa de profundidade e mistura das melhores fotos | aceito |
-| M3 | Aba Cômodo (RoomPlan): USDZ, JSON do cômodo, vários cômodos e planta baixa em SVG | em teste |
-| M4 a M10 | Biblioteca completa, viewer, exportações, processamento, editor, medição | a fazer |
+| M3 | Aba Cômodo (RoomPlan): USDZ, JSON do cômodo, vários cômodos e planta baixa em SVG | feito, sem teste em aparelho |
+| M4 | Biblioteca com miniatura, tamanho e situação; reprocessar com outras opções; solda e limpeza de pedaços soltos; nuvem densa | feito, sem teste em aparelho |
+| M5 | Visualizador 3D: modos Liso, Cor, Normais e Arame; perspectiva, ortográfica e planta com corte; vistas rápidas; grade, caixa de dimensões, eixos; caminhada; AR | feito, sem teste em aparelho |
+| M6 | Exportações: PLY, OBJ, GLB, glTF, USDZ, STL, DAE, nuvem em PLY, LAS, PTS, XYZ e PCD; ZIP dos arquivos e de todos os dados; planta em PNG | feito, sem teste em aparelho |
+| M7 | Atlas de textura (Rápido e HD) para OBJ, GLB e USDZ; reduzir pela metade; suavizar | feito, sem teste em aparelho. Falta "Refinar" (depende de aprovação) |
+| M8 | Editor com caixa de corte | a fazer |
+| M9 | Medição | a fazer |
+| M10 | Extras (nuvem densa pela profundidade, estatísticas, filtro por classificação) | a fazer |
+
+"Sem teste em aparelho" quer dizer: compila, e a lógica que roda fora do aparelho passa
+nos testes automáticos (118 no ScanCore, mais o validador oficial de glTF no CI), mas
+ninguém ainda usou a tela no iPad.
+
+## Processar e exportar (M4, M6, M7)
+
+Na tela de um scan, **Opções de exportação** define o que **Gerar arquivos** produz. As
+opções ficam salvas e valem também para o export automático ao finalizar uma captura.
+
+| Formato | Arquivo | Observação |
+|---|---|---|
+| PLY (malha) | `scan-<id>-zup.ply` | binário, normais, cor e classificação por face |
+| OBJ + MTL | `scan-<id>-zup.obj` | cor por vértice; com textura vira `-textura-zup.obj` + `.mtl` + `.jpg` |
+| GLB | `scan-<id>.glb` | sempre Y para cima; com textura vira `-textura.glb`, com a imagem embutida |
+| glTF + BIN | `scan-<id>.gltf` | mesmo conteúdo do GLB em dois arquivos (sempre cor por vértice) |
+| USDZ | `scan-<id>.usdz` | abre em AR no iPhone e no iPad; com textura vira `-textura.usdz` |
+| STL | `scan-<id>-zup.stl` | binário, sem cor |
+| DAE | `scan-<id>-zup.dae` | Collada 1.4.1, para SketchUp |
+| PLY (nuvem) | `scan-<id>-nuvem-zup.ply` | só pontos |
+| LAS 1.2 | `scan-<id>-nuvem-zup.las` | formato de ponto 2 (XYZ + RGB de 16 bits), escala de 1 mm |
+| PTS, XYZ | `...-nuvem-zup.pts`, `.xyz` | texto |
+| PCD | `...-nuvem-zup.pcd`, `-texto.pcd` | binário e texto |
+
+Outras opções:
+
+- **Eixo:** Z para cima (CAD) ou Y para cima (ARKit). GLB, glTF e USDZ são sempre Y.
+- **Nuvem:** só os vértices da malha, ou densa (pontos espalhados sobre as faces a cada
+  5, 2 ou 1 cm).
+- **Limpeza:** soldar vértices duplicados na divisa dos blocos da malha; remover pedaços
+  soltos com menos de 40 triângulos.
+- **Processamento:** textura (Rápido, atlas de 4096 px; HD, 8192 px), reduzir a malha
+  pela metade (agrupamento de vértices em grade) e suavizar (Laplaciana, 3 passadas,
+  borda fixa).
+
+O bruto do scan nunca é alterado: toda opção age só nos arquivos gerados.
+
+**Como a textura é montada.** Cada triângulo escolhe a melhor foto, com a mesma nota e o
+mesmo teste de oclusão da cor por vértice. Triângulos vizinhos que usam a mesma foto
+formam um recorte; o retângulo de cada recorte é copiado da foto para uma imagem única
+(o atlas), reduzido por uma escala escolhida para tudo caber. Sem mistura entre fotos
+nesta versão: onde dois recortes se encontram pode aparecer diferença de tom.
+
+## Visualizador 3D (M5)
+
+Na tela de um scan, **Ver em 3D**. Arrastar gira, dois dedos deslizam, pinça aproxima;
+funciona igual com o Apple Pencil. Duplo toque num ponto da malha faz dele o centro do giro.
+
+- **Modos:** Liso, Cor (por vértice), Normais e Arame.
+- **Projeções:** Perspectiva, Ortográfica e Planta (vista de cima com um corte de altura
+  ajustável, que esconde o teto; dá para salvar a vista em PNG).
+- **Vistas rápidas:** Topo, Frente, Lado e 3D.
+- **Mais:** grade no piso, caixa de dimensões, eixos, FPS, caminhar pelo scan (joystick e
+  altura dos olhos) e ver em AR.
+- **Barra inferior:** Apagar, Mais, Processar, Editar e Medir (ainda desativados) e
+  Compartilhar.
 
 ## Cômodo e planta baixa (M3)
 
