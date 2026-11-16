@@ -28,6 +28,13 @@ struct SceneViewContainer: UIViewRepresentable {
         doubleTap.numberOfTapsRequired = 2
         view.addGestureRecognizer(doubleTap)
 
+        // Toque simples: marca pontos na medição. Espera o duplo toque falhar, para os
+        // dois não dispararem juntos.
+        let singleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap(_:)))
+        singleTap.numberOfTapsRequired = 1
+        singleTap.require(toFail: doubleTap)
+        view.addGestureRecognizer(singleTap)
+
         // Só fica ativo no modo caminhada, para girar o olhar.
         let lookPan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleLookPan(_:)))
         lookPan.isEnabled = false
@@ -49,6 +56,10 @@ struct SceneViewContainer: UIViewRepresentable {
 
         @objc func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
             controller.setFocus(at: recognizer.location(in: recognizer.view))
+        }
+
+        @objc func handleSingleTap(_ recognizer: UITapGestureRecognizer) {
+            controller.handleTap(at: recognizer.location(in: recognizer.view))
         }
 
         @objc func handleLookPan(_ recognizer: UIPanGestureRecognizer) {

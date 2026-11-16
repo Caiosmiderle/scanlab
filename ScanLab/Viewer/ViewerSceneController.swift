@@ -16,7 +16,11 @@ final class ViewerSceneController {
     private let gridNode = SCNNode()
     private let boxNode = SCNNode()
     private let axesNode = SCNNode()
+    private let measureRoot = SCNNode()
     private let cameraNode = SCNNode()
+
+    /// Toque simples na cena (usado pela medição). `nil` quando ninguém está ouvindo.
+    var onTap: ((CGPoint) -> Void)?
 
     private var projection: ViewerProjection = .perspective
     /// Altura do corte do modo Planta, em metros acima do piso.
@@ -55,6 +59,7 @@ final class ViewerSceneController {
         scene.rootNode.addChildNode(gridNode)
         scene.rootNode.addChildNode(boxNode)
         scene.rootNode.addChildNode(axesNode)
+        scene.rootNode.addChildNode(measureRoot)
     }
 
     deinit {
@@ -408,6 +413,12 @@ final class ViewerSceneController {
     }
 
     private func addLabel(_ string: String, at position: SIMD3<Float>, height: Float, color: UIColor) {
+        boxNode.addChildNode(ViewerSceneController.labelNode(string, at: position, height: height, color: color))
+    }
+
+    /// Texto que fica sempre de frente para a câmera.
+    /// - Parameter height: altura das letras, em metros.
+    static func labelNode(_ string: String, at position: SIMD3<Float>, height: Float, color: UIColor, alwaysOnTop: Bool = false) -> SCNNode {
         let text = SCNText(string: string, extrusionDepth: 0)
         // O SCNText mede em pontos de fonte: desenhamos com fonte 10 e reduzimos o nó.
         text.font = UIFont.systemFont(ofSize: 10, weight: .semibold)
@@ -416,9 +427,15 @@ final class ViewerSceneController {
         material.diffuse.contents = color
         material.lightingModel = .constant
         material.isDoubleSided = true
+        if alwaysOnTop {
+            material.readsFromDepthBuffer = false
+        }
         text.materials = [material]
 
         let textNode = SCNNode(geometry: text)
+        if alwaysOnTop {
+            textNode.renderingOrder = 200
+        }
         // Centraliza o texto no próprio nó, para ele girar em torno do meio.
         let (lower, upper) = text.boundingBox
         textNode.pivot = SCNMatrix4MakeTranslation((lower.x + upper.x) / 2, lower.y, 0)
@@ -430,7 +447,92 @@ final class ViewerSceneController {
         // O rótulo fica sempre de frente para a câmera.
         holder.constraints = [SCNBillboardConstraint()]
         holder.addChildNode(textNode)
-        boxNode.addChildNode(holder)
+        return holder
+    }
+
+    // MARK: - Medição (M9)
+
+    func handleTap(at point: CGPoint) {
+        onTap?(point)
+    }
+
+    /// Ponto da malha sob o toque, no mundo do scan.
+    /// - Parameter snapDistance: se maior que zero, o ponto gruda no vértice mais próximo
+    ///   dentro dessa distância (metros). Ajuda a pegar quinas, onde há mais vértices.
+    func surfacePoint(at point: CGPoint, snapDistance: Float) -> SIMD3<Float>? {
+        guard let view = view, let model = model else {
+            return nil
+        }
+        let hits = view.hitTest(point, options: [SCNHitTestOption.searchMode: SCNHitTestSearchMode.closest.rawValue])
+        for hit in hits where hit.node.parent === meshRoot {
+            let world = hit.worldCoordinates
+            let surface = SIMD3<Float>(Float(world.x), Float(world.y), Float(world.z))
+            if snapDistance > 0,
+               let snapped = MeasureMath.nearestVertex(to: surface, positions: model.mesh.positions, maxDistance: snapDistance) {
+                return snapped
+            }
+            return surface
+        }
+        return nil
+    }
+
+    /// Desenha as medidas salvas (laranja) e a que está sendo feita (ciano).
+    /// Linhas, pontos e rótulos são desenhados por cima da malha, para não sumirem
+    /// dentro das paredes.
+    func showMeasurements(_ records: [MeasurementRecord], pending: [SIMD3<Float>], pendingClosed: Bool) {
+        for child in measureRoot.childNodes {
+            child.removeFromParentNode()
+        }
+        let size = model?.radius ?? 1
+        let dotRadius = CGFloat(min(0.04, max(0.012, size * 0.008)))
+        let labelHeight = max(0.06, size * 0.03)
+
+        func addPath(_ points: [SIMD3<Float>], closed: Bool, color: UIColor) {
+            for point in points {
+                let sphere = SCNSphere(radius: dotRadius)
+                let material = SCNMaterial()
+                material.diffuse.contents = color
+                material.lightingModel = .constant
+                material.readsFromDepthBuffer = false
+                sphere.materials = [material]
+                let node = SCNNode(geometry: sphere)
+                node.simdPosition = point
+                node.renderingOrder = 150
+                measureRoot.addChildNode(node)
+            }
+            if points.count < 2 {
+                return
+            }
+            var segments: [SIMD3<Float>] = []
+            for index in 1..<points.count {
+                segments.append(points[index - 1])
+                segments.append(points[index])
+            }
+            if closed && points.count > 2, let first = points.first, let last = points.last {
+                segments.append(last)
+                segments.append(first)
+            }
+            let geometry = SceneGeometry.lines(segments, color: color)
+            geometry.firstMaterial?.readsFromDepthBuffer = false
+            let lineNode = SCNNode(geometry: geometry)
+            lineNode.renderingOrder = 140
+            measureRoot.addChildNode(lineNode)
+        }
+
+        let saved = UIColor.systemOrange
+        for record in records {
+            addPath(record.points, closed: record.kind == .area, color: saved)
+            // Rótulo um pouco acima do meio da medida.
+            let position = record.labelPoint + SIMD3<Float>(0, labelHeight * 0.8, 0)
+            measureRoot.addChildNode(ViewerSceneController.labelNode("\(record.name): \(record.formattedValue)",
+                                                                     at: position, height: labelHeight, color: saved, alwaysOnTop: true))
+        }
+        addPath(pending, closed: pendingClosed, color: UIColor.systemCyan)
+    }
+
+    /// Esconde ou mostra as medidas sem apagá-las.
+    func setMeasurementsVisible(_ visible: Bool) {
+        measureRoot.isHidden = !visible
     }
 
     /// Eixos na origem do scan (onde a captura começou): X vermelho, Y verde, Z azul.

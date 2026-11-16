@@ -42,6 +42,13 @@ struct ScanViewerScreen: View {
     @State private var previewRequest: PreviewRequest? = nil
     @State private var shareRequest: ShareRequest? = nil
 
+    // Medição (M9)
+    @State private var measureTool: MeasureTool? = nil
+    @State private var pendingPoints: [SIMD3<Float>] = []
+    @State private var measurements: [MeasurementRecord] = []
+    @State private var snapToCorners = true
+    @State private var showMeasureList = false
+
     var body: some View {
         ZStack {
             SceneViewContainer(controller: controller)
@@ -59,6 +66,15 @@ struct ScanViewerScreen: View {
                     Spacer()
                     if isWalking {
                         walkControls
+                    } else if measureTool != nil {
+                        if let notice = notice {
+                            Text(notice)
+                                .font(.callout)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        measurePanel
                     } else {
                         if projection == .plan {
                             planControls
@@ -74,10 +90,25 @@ struct ScanViewerScreen: View {
         .navigationTitle(scanName)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            controller.onTap = { point in
+                handleMeasureTap(point)
+            }
             load()
         }
         .onDisappear {
             controller.stopWalking()
+        }
+        .onChange(of: measurements) { _, _ in
+            renderMeasurements()
+        }
+        .onChange(of: pendingPoints) { _, _ in
+            renderMeasurements()
+        }
+        .sheet(isPresented: $showMeasureList) {
+            MeasurementListSheet(measurements: $measurements, onChange: {
+                MeasurementStore.save(measurements, scanID: scanID)
+            })
+            .presentationDetents([.medium, .large])
         }
         .onChange(of: mode) { _, newMode in
             controller.apply(mode: newMode)
@@ -151,6 +182,8 @@ struct ScanViewerScreen: View {
                     dimensionsText = controller.dimensionsText
                     modelHeight = controller.modelHeight
                     planCutHeight = controller.currentPlanCutHeight
+                    measurements = MeasurementStore.load(scanID: id)
+                    renderMeasurements()
                     isLoading = false
                 }
             } catch {
@@ -376,13 +409,21 @@ struct ScanViewerScreen: View {
                 barLabel("Processar", icon: "slider.horizontal.3")
             }
 
-            // Editor (M8) e medição (M9) ainda não existem: os botões ficam desativados.
-            barButton("Editar", icon: "crop", role: nil) {
+            NavigationLink {
+                EditorScreen(scanID: scanID, scanName: scanName)
+            } label: {
+                barLabel("Editar", icon: "crop")
             }
-            .disabled(true)
-            barButton("Medir", icon: "ruler", role: nil) {
+            .disabled(isWalking || isBusy)
+
+            Button {
+                toggleMeasuring()
+            } label: {
+                barLabel(measureTool == nil ? "Medir" : "Sair da medição", icon: measureTool == nil ? "ruler" : "ruler.fill")
             }
-            .disabled(true)
+            .hoverEffect(.highlight)
+            .disabled(isWalking)
+            .accessibilityLabel(measureTool == nil ? "Medir" : "Sair da medição")
 
             barButton("Compartilhar", icon: "square.and.arrow.up", role: nil) {
                 shareOutputs()
@@ -415,7 +456,164 @@ struct ScanViewerScreen: View {
 
     // MARK: - Ações
 
+    // MARK: - Medição (M9)
+
+    private var measurePanel: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                Picker("Ferramenta", selection: Binding(get: { measureTool ?? .distance }, set: { tool in
+                    measureTool = tool
+                    pendingPoints = []
+                })) {
+                    ForEach(MeasureTool.allCases) { tool in
+                        Label(tool.title, systemImage: tool.icon).tag(tool)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 280)
+
+                Toggle("Ímã nos cantos", isOn: $snapToCorners)
+                    .fixedSize()
+            }
+
+            Text(measureInstruction)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 10) {
+                if measureTool == .area {
+                    Button {
+                        finishArea()
+                    } label: {
+                        Label("Concluir área", systemImage: "checkmark.circle.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(pendingPoints.count < 3)
+                }
+                Button {
+                    if !pendingPoints.isEmpty {
+                        pendingPoints.removeLast()
+                    }
+                } label: {
+                    Label("Desfazer ponto", systemImage: "arrow.uturn.backward")
+                }
+                .buttonStyle(.bordered)
+                .disabled(pendingPoints.isEmpty)
+
+                Button {
+                    showMeasureList = true
+                } label: {
+                    Label("Medidas (\(measurements.count))", systemImage: "list.bullet")
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    exportMeasurements()
+                } label: {
+                    Label("Exportar", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.bordered)
+                .disabled(measurements.isEmpty || isBusy)
+            }
+            .hoverEffect(.highlight)
+
+            Text("Medidas aproximadas (LiDAR). Confira com a trena.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: 720)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var measureInstruction: String {
+        switch measureTool {
+        case .distance:
+            return pendingPoints.isEmpty ? "Toque no primeiro ponto da malha." : "Toque no segundo ponto."
+        case .area:
+            if pendingPoints.count < 3 {
+                return "Toque nos cantos do piso, em ordem. Faltam \(3 - pendingPoints.count) ponto(s) no mínimo."
+            }
+            let area = MeasureMath.horizontalArea(pendingPoints)
+            return "\(pendingPoints.count) cantos, \(FloorPlanSVG.formatMeters(area)) m² até agora. Toque em mais cantos ou conclua."
+        case .none:
+            return ""
+        }
+    }
+
+    private func toggleMeasuring() {
+        if measureTool == nil {
+            measureTool = .distance
+            pendingPoints = []
+            notice = nil
+        } else {
+            measureTool = nil
+            pendingPoints = []
+            notice = nil
+        }
+    }
+
+    private func handleMeasureTap(_ point: CGPoint) {
+        guard let tool = measureTool, !isWalking else {
+            return
+        }
+        guard let surface = controller.surfacePoint(at: point, snapDistance: snapToCorners ? 0.03 : 0) else {
+            notice = "Toque em cima da malha."
+            return
+        }
+        notice = nil
+        pendingPoints.append(surface)
+        if tool == .distance && pendingPoints.count == 2 {
+            addMeasurement(kind: .distance)
+        }
+    }
+
+    private func finishArea() {
+        guard pendingPoints.count >= 3 else {
+            return
+        }
+        addMeasurement(kind: .area)
+    }
+
+    private func addMeasurement(kind: MeasurementKind) {
+        let number = measurements.count + 1
+        let name = kind == .distance ? "Distância \(number)" : "Área \(number)"
+        let record = MeasurementRecord(name: name, kind: kind, points: pendingPoints)
+        measurements.append(record)
+        pendingPoints = []
+        MeasurementStore.save(measurements, scanID: scanID)
+        notice = "\(name): \(record.formattedValue)"
+        AppLog.info(.processing, "Medida no scan \(scanID): \(name) = \(record.formattedValue) pontos=\(record.points.count) ímã=\(snapToCorners)")
+    }
+
+    private func renderMeasurements() {
+        controller.showMeasurements(measurements, pending: pendingPoints, pendingClosed: measureTool == .area)
+    }
+
+    /// Grava as medidas em CSV e uma imagem da vista atual, e abre o compartilhamento.
+    private func exportMeasurements() {
+        let outputs = ScanStore.shared.outputsDirectory(for: scanID)
+        let csvURL = outputs.appendingPathComponent("medidas-\(scanID).csv")
+        let imageURL = outputs.appendingPathComponent("medidas-\(scanID).png")
+        do {
+            try AppPaths.ensureDirectory(outputs)
+            try Data(MeasureMath.csv(measurements).utf8).write(to: csvURL, options: .atomic)
+            var urls = [csvURL]
+            if let shot = controller.snapshot(), let png = shot.image.pngData() {
+                try png.write(to: imageURL, options: .atomic)
+                urls.append(imageURL)
+            }
+            AppLog.info(.export, "Medidas do scan \(scanID) exportadas: \(measurements.count) medidas")
+            shareRequest = ShareRequest(urls: urls)
+        } catch {
+            notice = "Não foi possível exportar as medidas: \(error.localizedDescription)"
+        }
+    }
+
     private func startWalking() {
+        measureTool = nil
+        pendingPoints = []
         mode = hasColors ? .textured : .flat
         controller.startWalking()
         isWalking = controller.isWalking
