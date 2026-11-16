@@ -42,6 +42,19 @@ enum ZipArchiver {
         return zipURL
     }
 
+    /// "Todos os dados": ZIP da pasta inteira do scan (bruto, fotos, profundidade,
+    /// `frames.json` e arquivos gerados). Zipa a pasta no lugar, sem cópia intermediária,
+    /// porque ela pode ter centenas de megabytes. Síncrono: chamar fora da thread principal.
+    static func zipWholeScan(scanID: String) throws -> URL {
+        let fileManager = FileManager.default
+        let base = fileManager.temporaryDirectory.appendingPathComponent("ScanLabShare", isDirectory: true)
+        try fileManager.createDirectory(at: base, withIntermediateDirectories: true)
+        let zipURL = base.appendingPathComponent("scan-\(scanID)-completo.zip")
+        try zipFolder(ScanStore.shared.directory(for: scanID), to: zipURL)
+        AppLog.info(.export, "ZIP completo do scan \(scanID): \(AppPaths.formatBytes(AppPaths.fileSize(zipURL)))")
+        return zipURL
+    }
+
     /// Síncrono: chamar fora da thread principal.
     static func zipFolder(_ folder: URL, to destination: URL) throws {
         var coordinatorError: NSError?

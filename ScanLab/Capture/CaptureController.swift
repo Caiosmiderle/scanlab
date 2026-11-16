@@ -304,8 +304,16 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             // biblioteca e pode ser exportado de novo por lá.
             var exportNote = ""
             do {
-                _ = try MeshExporter.exportPLYAndOBJ(scanID: meta.id, axis: axis, colorize: AppSettings.colorizeOnExport) { fraction, text in
+                var options = AppSettings.exportOptions
+                options.axis = axis
+                if options.formats.isEmpty {
+                    options.formats = [.plyMesh, .obj]
+                }
+                let result = try MeshExporter.export(scanID: meta.id, options: options, cancel: CancelFlag()) { fraction, text in
                     self.reportSaving(0.25 + 0.75 * fraction, text)
+                }
+                if !result.failures.isEmpty {
+                    exportNote = " Alguns formatos falharam: \(result.failures.joined(separator: "; "))."
                 }
             } catch {
                 exportNote = " A exportação falhou (\(error.localizedDescription)); tente de novo pela Biblioteca."

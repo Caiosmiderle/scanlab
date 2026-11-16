@@ -9,7 +9,7 @@ enum ColorProcessor {
 
     /// Devolve `nil` se o scan não tiver keyframes (scans feitos antes do M2).
     /// A malha precisa estar em Y-up, o mundo do ARKit.
-    static func colorize(mesh: inout WorldMesh, scanID: String, progress: @escaping (Double) -> Void) -> ColorizeReport? {
+    static func colorize(mesh: inout WorldMesh, scanID: String, useOcclusion: Bool, progress: @escaping (Double) -> Void) -> ColorizeReport? {
         let store = ScanStore.shared
         let folder = store.directory(for: scanID)
         guard let data = try? Data(contentsOf: store.framesURL(for: scanID)),
@@ -34,7 +34,7 @@ enum ColorProcessor {
         // 100 KB em memória, então dá para carregar todos de uma vez.
         var depthMaps: [DepthMap?] = []
         var depthLoaded = 0
-        if AppSettings.useOcclusion {
+        if useOcclusion {
             for record in records {
                 var map: DepthMap? = nil
                 if let depthFile = record.depthFile,

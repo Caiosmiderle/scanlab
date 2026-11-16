@@ -75,6 +75,12 @@ enum SettingsKeys {
     static let keyframeDistanceCm = "keyframeDistanceCm"
     static let keyframeAngle = "keyframeAngle"
     static let keyframeMaxCount = "keyframeMaxCount"
+    /// Formatos marcados para exportar: nomes de `ExportFormat` separados por vírgula.
+    static let exportFormats = "exportFormats"
+    /// Valor bruto de `CloudDensity`.
+    static let cloudDensity = "cloudDensity"
+    static let weldVertices = "weldVertices"
+    static let removeSmallComponents = "removeSmallComponents"
 }
 
 /// Leitura dos ajustes com os valores padrão da especificação.
