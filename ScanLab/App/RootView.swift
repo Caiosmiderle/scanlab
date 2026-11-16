@@ -1,12 +1,17 @@
 import SwiftUI
 
-/// Abas principais do app. A aba "Cômodo" (RoomPlan) entra no marco M3.
+/// Abas principais do app.
 struct RootView: View {
     var body: some View {
         TabView {
             CaptureView()
                 .tabItem {
                     Label("Capturar", systemImage: "viewfinder")
+                }
+
+            RoomScanView()
+                .tabItem {
+                    Label("Cômodo", systemImage: "house")
                 }
 
             LibraryView()

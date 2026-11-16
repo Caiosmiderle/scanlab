@@ -17,8 +17,33 @@ SceneKit, Metal). Interface, textos e identidade próprios.
 | M0 | Pipeline código → CI → `.ipa` → sideload, tela com status do LiDAR | aceito (iPad Pro M2 e iPhone 15 Pro, sistema 27) |
 | M1 | Captura da malha LiDAR, bruto `mesh.bin`, export PLY e OBJ, biblioteca básica, logs | aceito |
 | M2A | Keyframes (foto + pose) durante o scan e cor por vértice no PLY e no OBJ | aceito |
-| M2B | Teste de oclusão com o mapa de profundidade e mistura das melhores fotos | em teste |
-| M3 a M10 | RoomPlan, biblioteca completa, viewer, exportações, processamento, editor, medição | a fazer |
+| M2B | Teste de oclusão com o mapa de profundidade e mistura das melhores fotos | aceito |
+| M3 | Aba Cômodo (RoomPlan): USDZ, JSON do cômodo, vários cômodos e planta baixa em SVG | em teste |
+| M4 a M10 | Biblioteca completa, viewer, exportações, processamento, editor, medição | a fazer |
+
+## Cômodo e planta baixa (M3)
+
+A aba **Cômodo** usa o RoomPlan da Apple: você contorna o cômodo com o iPad e ele
+reconhece paredes, portas, janelas e vãos. Ao tocar em **Concluir cômodo** aparecem a
+área, o perímetro e o pé-direito aproximados. Daí dá para:
+
+- **Outro cômodo:** continuar no cômodo seguinte sem sair da tela. Como a sessão de AR
+  não é interrompida, todos ficam no mesmo sistema de coordenadas e entram na mesma planta.
+- **Salvar:** grava o item na Biblioteca.
+
+O que é gravado em `Documents/Scans/<id>/`:
+
+| Arquivo | Conteúdo |
+|---|---|
+| `rooms/comodo-N.json` | o cômodo como o RoomPlan entregou (`CapturedRoom` em JSON) |
+| `plan.json` | paredes, aberturas e contorno em estruturas simples, usadas para a planta |
+| `outputs/planta-<id>.svg` | planta baixa: paredes, portas (laranja), janelas (azul), vãos (tracejado), cota de cada parede, nome e área de cada cômodo, barra de escala de 1 m |
+| `outputs/comodo-N-malha.usdz` | modelo 3D com os vãos recortados nas paredes |
+| `outputs/comodo-N-parametrico.usdz` | modelo 3D em caixas simples, mais fácil de editar |
+| `outputs/apartamento-<id>.usdz` | todos os cômodos juntos (quando há mais de um) |
+
+A área vem do contorno do piso que o RoomPlan entrega; se não houver, do polígono
+formado pelas paredes; se as paredes não fecharem, a planta mostra só as cotas.
 
 ## Como usar (M1)
 

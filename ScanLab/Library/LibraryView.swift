@@ -62,9 +62,17 @@ struct LibraryView: View {
 private struct ScanRow: View {
     let scan: ScanMeta
 
+    private var detailText: String {
+        if scan.isRoomScan {
+            let count = scan.rooms?.count ?? 0
+            return count == 1 ? "1 cômodo · planta e USDZ" : "\(count) cômodos · planta e USDZ"
+        }
+        return "\(scan.faceCount) triângulos · \(scan.status)"
+    }
+
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "cube.transparent")
+            Image(systemName: scan.isRoomScan ? "house" : "cube.transparent")
                 .font(.title2)
                 .foregroundStyle(.tint)
                 .frame(width: 36)
@@ -76,7 +84,7 @@ private struct ScanRow: View {
                 Text(scan.createdAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Text("\(scan.faceCount) triângulos · \(scan.status)")
+                Text(detailText)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

@@ -89,6 +89,21 @@ struct ScanDetailView: View {
 
     private func content(_ scan: ScanMeta) -> some View {
         List {
+            if scan.isRoomScan {
+                // Item do RoomPlan: não há malha para exportar, só as medidas dos cômodos.
+                Section {
+                    infoRow("Data", scan.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    ForEach(scan.rooms ?? [], id: \.name) { summary in
+                        RoomSummaryRow(summary: summary)
+                            .padding(.vertical, 4)
+                    }
+                    infoRow("Tamanho em disco", AppPaths.formatBytes(diskSize))
+                } header: {
+                    Text("Cômodos")
+                } footer: {
+                    Text("Medidas aproximadas, calculadas pelo RoomPlan. Confira com a trena. A planta está no arquivo .svg e o modelo 3D nos arquivos .usdz.")
+                }
+            } else {
             Section("Informações") {
                 infoRow("Data", scan.createdAt.formatted(date: .abbreviated, time: .shortened))
                 infoRow("Duração", formatDuration(scan.durationSeconds))
@@ -139,6 +154,7 @@ struct ScanDetailView: View {
                 Text("Exportar")
             } footer: {
                 Text("Os arquivos são gerados a partir do bruto do scan, que nunca é alterado. Medidas aproximadas: confira com a trena.")
+            }
             }
 
             Section {
