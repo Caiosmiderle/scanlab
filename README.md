@@ -23,8 +23,8 @@ SceneKit, Metal). Interface, textos e identidade próprios.
 | M5 | Visualizador 3D: modos Liso, Cor, Normais e Arame; perspectiva, ortográfica e planta com corte; vistas rápidas; grade, caixa de dimensões, eixos; caminhada; AR | feito, sem teste em aparelho |
 | M6 | Exportações: PLY, OBJ, GLB, glTF, USDZ, STL, DAE, nuvem em PLY, LAS, PTS, XYZ e PCD; ZIP dos arquivos e de todos os dados; planta em PNG | feito, sem teste em aparelho |
 | M7 | Atlas de textura (Rápido e HD) para OBJ, GLB e USDZ; reduzir pela metade; suavizar | feito, sem teste em aparelho. Falta "Refinar" (depende de aprovação) |
-| M8 | Editor com caixa de corte | a fazer |
-| M9 | Medição | a fazer |
+| M8 | Editor: caixa de corte com alças e ajuste fino, apagar dentro ou fora, desfazer e refazer, salvar como nova versão | feito, sem teste em aparelho |
+| M9 | Medição: distância e área do piso por toque na malha, ímã nos cantos, lista, CSV e imagem | feito, sem teste em aparelho |
 | M10 | Extras (nuvem densa pela profundidade, estatísticas, filtro por classificação) | a fazer |
 
 "Sem teste em aparelho" quer dizer: compila, e a lógica que roda fora do aparelho passa
@@ -80,8 +80,32 @@ funciona igual com o Apple Pencil. Duplo toque num ponto da malha faz dele o cen
 - **Vistas rápidas:** Topo, Frente, Lado e 3D.
 - **Mais:** grade no piso, caixa de dimensões, eixos, FPS, caminhar pelo scan (joystick e
   altura dos olhos) e ver em AR.
-- **Barra inferior:** Apagar, Mais, Processar, Editar e Medir (ainda desativados) e
-  Compartilhar.
+- **Barra inferior:** Apagar, Mais, Processar, Editar, Medir e Compartilhar.
+
+## Editor de corte (M8)
+
+Na tela do scan, **Cortar (editor)**, ou **Editar** no visualizador. A malha aparece
+cinza com uma caixa amarela em volta. Cada bolinha (X vermelha, Y verde, Z azul) move uma
+face da caixa: arraste com o dedo ou o Pencil. **Ajuste fino da caixa** abre controles
+deslizantes para cada eixo. Depois:
+
+- **Apagar dentro** ou **Apagar fora** da caixa (decide pelo centro de cada triângulo);
+- **Desfazer** e **Refazer** (até 15 passos);
+- **Salvar como nova versão**: cria um item novo na Biblioteca, "(recorte)". O scan
+  original não muda. A versão reaproveita as fotos do original por link físico, sem
+  ocupar espaço extra, então dá para colorir, texturizar e exportar normalmente.
+
+## Medição (M9)
+
+No visualizador, **Medir**:
+
+- **Distância:** toque em dois pontos da malha.
+- **Área do piso:** toque nos cantos em ordem e em **Concluir área**. A área é calculada
+  na projeção sobre o piso, então pequenas diferenças de altura entre os toques não pesam.
+- **Ímã nos cantos:** o toque gruda no vértice da malha mais próximo, a até 3 cm.
+- **Medidas:** lista com renomear e apagar. Ficam salvas em `measurements.json`.
+- **Exportar:** `medidas-<id>.csv` (separador ponto e vírgula, abre direto no Excel em
+  português) e `medidas-<id>.png` com a vista atual.
 
 ## Cômodo e planta baixa (M3)
 
