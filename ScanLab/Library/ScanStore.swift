@@ -26,6 +26,8 @@ struct ScanMeta: Codable, Identifiable, Equatable {
     var rooms: [RoomSummary]?
     /// Parâmetros da última exportação (formatos, eixo, limpeza...).
     var lastExport: String?
+    /// Se este item é uma versão editada de outro (corte), o identificador do original.
+    var sourceScanID: String?
 
     var isRoomScan: Bool {
         return kind == ScanKind.room
@@ -225,6 +227,88 @@ final class ScanStore: ObservableObject {
             // Não deixa uma pasta pela metade aparecendo na biblioteca.
             try? FileManager.default.removeItem(at: folder)
             throw error
+        }
+    }
+
+    /// Salva uma versão editada de um scan como um item novo (marco M8).
+    ///
+    /// O original não é tocado. A versão ganha um `mesh.bin` próprio e reaproveita as
+    /// fotos e a profundidade do original por "link físico" (hard link): o arquivo existe
+    /// uma vez só no disco, com dois nomes. Não ocupa espaço extra e, se o original for
+    /// apagado depois, as fotos continuam existindo para a versão.
+    /// Só mexe em arquivos: pode rodar em fila de background.
+    func createVersion(from sourceID: String, anchors: [MeshAnchorData], label: String) throws -> ScanMeta {
+        guard let source = loadMeta(id: sourceID) else {
+            throw ScanStoreError.scanNotFound
+        }
+        guard MeshCropper.faceCount(anchors) > 0 else {
+            throw ScanStoreError.emptyScan
+        }
+
+        let now = Date()
+        let id = makeUniqueID(for: now)
+        let folder = directory(for: id)
+        let sourceFolder = directory(for: sourceID)
+
+        do {
+            try AppPaths.ensureDirectory(folder)
+            try AppPaths.ensureDirectory(outputsDirectory(for: id))
+
+            let sink = try FileSink(url: rawMeshURL(for: id))
+            try RawMeshFile.write(anchors: anchors, to: sink)
+            try sink.close()
+
+            for name in ["frames", "depth"] {
+                try linkTree(from: sourceFolder.appendingPathComponent(name, isDirectory: true),
+                             to: folder.appendingPathComponent(name, isDirectory: true))
+            }
+            for name in ["frames.json", ThumbnailMaker.fileName] {
+                try linkOrCopy(from: sourceFolder.appendingPathComponent(name), to: folder.appendingPathComponent(name))
+            }
+
+            var meta = source
+            meta.id = id
+            meta.name = "\(source.name) (\(label))"
+            meta.createdAt = now
+            meta.appVersion = AppInfo.versionText
+            meta.anchorCount = anchors.count
+            meta.vertexCount = MeshCropper.vertexCount(anchors)
+            meta.faceCount = MeshCropper.faceCount(anchors)
+            meta.status = "bruto"
+            meta.lastExport = nil
+            meta.sourceScanID = sourceID
+            try saveMeta(meta)
+            AppLog.info(.processing, "Versão \(id) criada a partir de \(sourceID): blocos=\(meta.anchorCount) faces=\(meta.faceCount)")
+            return meta
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
+    }
+
+    /// Cria um link físico de `source` em `destination`; se o sistema não deixar, copia.
+    private func linkOrCopy(from source: URL, to destination: URL) throws {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: source.path) else {
+            return
+        }
+        do {
+            try fileManager.linkItem(at: source, to: destination)
+        } catch {
+            try fileManager.copyItem(at: source, to: destination)
+        }
+    }
+
+    /// Faz `linkOrCopy` de todos os arquivos de uma pasta (sem subpastas).
+    private func linkTree(from source: URL, to destination: URL) throws {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: source.path) else {
+            return
+        }
+        try AppPaths.ensureDirectory(destination)
+        let files = try fileManager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
+        for file in files {
+            try linkOrCopy(from: file, to: destination.appendingPathComponent(file.lastPathComponent))
         }
     }
 

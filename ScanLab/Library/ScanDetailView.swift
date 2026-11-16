@@ -192,10 +192,24 @@ struct ScanDetailView: View {
             NavigationLink {
                 ScanViewerScreen(scanID: scan.id, scanName: scan.name)
             } label: {
-                Label("Ver em 3D", systemImage: "cube.transparent")
+                Label("Ver em 3D e medir", systemImage: "cube.transparent")
                     .font(.headline)
             }
             .disabled(job.isRunning)
+
+            NavigationLink {
+                EditorScreen(scanID: scan.id, scanName: scan.name)
+            } label: {
+                Label("Cortar (editor)", systemImage: "crop")
+            }
+            .disabled(job.isRunning)
+
+            if let sourceID = scan.sourceScanID {
+                let sourceName = store.scans.first(where: { $0.id == sourceID })?.name ?? "um scan apagado"
+                Label("Versão cortada de \(sourceName)", systemImage: "arrow.triangle.branch")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
