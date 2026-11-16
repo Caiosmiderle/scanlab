@@ -17,6 +17,20 @@ public struct RGBAImage {
         self.pixels = pixels
     }
 
+    /// Para uso interno, quando o tamanho do vetor já é garantido por construção.
+    /// Se os números não baterem, cai numa imagem cinza de 1 x 1 em vez de falhar.
+    init(trustedWidth width: Int, height: Int, pixels: [UInt8]) {
+        if width > 0 && height > 0 && pixels.count == width * height * 4 {
+            self.width = width
+            self.height = height
+            self.pixels = pixels
+        } else {
+            self.width = 1
+            self.height = 1
+            self.pixels = [128, 128, 128, 255]
+        }
+    }
+
     /// Cor em (x, y), em pixels desta imagem, com interpolação bilinear.
     /// Coordenadas fora da imagem são trazidas para a borda.
     public func sample(x: Float, y: Float) -> (r: UInt8, g: UInt8, b: UInt8) {
