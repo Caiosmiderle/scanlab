@@ -22,6 +22,22 @@ final class KeyframeRecorder {
     private(set) var droppedCount = 0
     private(set) var failedCount = 0
 
+    // Estatísticas da profundidade, para diagnosticar LiDAR coberto ou sem medida.
+    private(set) var depthSavedCount = 0
+    private(set) var depthMissingCount = 0
+    /// Fração de pixels com medida no último mapa salvo (0 a 1); -1 se ainda não houve.
+    private(set) var lastDepthValidFraction: Float = -1
+    private var depthValidFractionSum: Float = 0
+
+    /// Resumo para o log, por exemplo "mapas=140 sem mapa=2 pixels com medida=93%".
+    var depthSummary: String {
+        if depthSavedCount == 0 {
+            return "mapas=0 sem mapa=\(depthMissingCount)"
+        }
+        let average = Int((depthValidFractionSum / Float(depthSavedCount) * 100).rounded())
+        return "mapas=\(depthSavedCount) sem mapa=\(depthMissingCount) pixels com medida=\(average)%"
+    }
+
     private var policy: KeyframePolicy
     private let saveDepth: Bool
     private let queue = DispatchQueue(label: "com.caio.scanlab.keyframes", qos: .userInitiated)
@@ -72,10 +88,17 @@ final class KeyframeRecorder {
         // é liberado na hora.
         var depthMap: DepthMap? = nil
         var depthFile: String? = nil
-        if saveDepth, let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth {
-            depthMap = copyDepth(depthData)
-            if depthMap != nil {
+        if saveDepth {
+            if let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth {
+                depthMap = copyDepth(depthData)
+            }
+            if let depthMap = depthMap {
                 depthFile = String(format: "depth/%06d.bin", index)
+                depthSavedCount += 1
+                lastDepthValidFraction = depthMap.validFraction
+                depthValidFractionSum += lastDepthValidFraction
+            } else {
+                depthMissingCount += 1
             }
         }
 

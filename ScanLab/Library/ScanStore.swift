@@ -28,7 +28,7 @@ enum ScanStoreError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .emptyScan:
-            return "Nenhuma malha foi capturada. Escaneie por mais tempo antes de finalizar."
+            return "O LiDAR não gerou malha neste scan, então não há o que salvar. Confira se o sensor LiDAR (ao lado das câmeras) não estava coberto pela mão ou pela capa e tente de novo."
         case .scanNotFound:
             return "Scan não encontrado no aparelho."
         }

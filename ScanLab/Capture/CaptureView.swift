@@ -151,8 +151,9 @@ struct CaptureView: View {
     }
 
     private var statusBanner: some View {
-        // Um aviso de rastreamento tem prioridade; sem aviso, as dicas se revezam.
-        let tracking = controller.trackingMessage
+        // Prioridade: aviso de scan sem malha, depois aviso de rastreamento; sem aviso,
+        // as dicas se revezam.
+        let tracking = controller.meshWarning ?? controller.trackingMessage
         let tipIndex = Int(controller.elapsedSeconds / 6) % tips.count
         let text = tracking ?? tips[tipIndex]
         return Label(text, systemImage: tracking == nil ? "lightbulb" : "exclamationmark.triangle.fill")

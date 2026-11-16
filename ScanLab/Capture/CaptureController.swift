@@ -28,6 +28,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     @Published private(set) var memoryWarning: Bool = false
     @Published private(set) var trackingMessage: String? = nil
+    /// Aviso de que o scan está rodando sem gerar malha (LiDAR coberto, por exemplo).
+    @Published private(set) var meshWarning: String? = nil
     @Published private(set) var savingProgress: Double = 0
     @Published private(set) var savingMessage: String = ""
     @Published private(set) var lastSavedSummary: String? = nil
@@ -53,6 +55,16 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     /// Início do trecho atual; `nil` quando pausado.
     private var segmentStart: Date?
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+
+    // Diagnóstico: já aconteceu de um scan de 3 minutos terminar com zero blocos de
+    // malha. Estes campos servem para avisar na hora e deixar rastro no log.
+    private var firstMeshLogged = false
+    private var lastProgressLogSeconds: Double = 0
+    private var lastTrackingText = "normal"
+    /// Depois de quantos segundos sem malha o aviso aparece.
+    private static let meshWarningDelay: Double = 6
+    /// De quanto em quanto tempo o andamento do scan vai para o log.
+    private static let progressLogInterval: Double = 15
 
     /// Espaço livre mínimo para começar um scan.
     private static let minimumFreeBytes: Int64 = 300_000_000
@@ -172,7 +184,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         if let activeRecorder = activeRecorder {
             // Espera o último keyframe terminar de ser gravado antes de salvar o scan.
             activeRecorder.finalize { records in
-                AppLog.info(.capture, "Keyframes: salvos=\(records.count) descartados por fila ocupada=\(activeRecorder.droppedCount) falhas=\(activeRecorder.failedCount)")
+                AppLog.info(.capture, "Keyframes: salvos=\(records.count) descartados por fila ocupada=\(activeRecorder.droppedCount) falhas=\(activeRecorder.failedCount) profundidade: \(activeRecorder.depthSummary)")
                 let captureDirectory = activeRecorder.directory
                 DispatchQueue.global(qos: .userInitiated).async {
                     self.saveScan(anchors: anchors, duration: duration, mode: mode, axis: axis,
@@ -368,6 +380,10 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         triangleCount = 0
         keyframeCount = 0
         trackingMessage = nil
+        meshWarning = nil
+        firstMeshLogged = false
+        lastProgressLogSeconds = 0
+        lastTrackingText = "normal"
     }
 
     private func tick() {
@@ -387,6 +403,25 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         anchorCount = meshAnchors.count
         triangleCount = triangles
         keyframeCount = recorder?.records.count ?? 0
+
+        // Sem nenhum bloco de malha depois de alguns segundos: avisa em vez de deixar
+        // o usuário descobrir só no fim.
+        if meshAnchors.isEmpty && elapsed > CaptureController.meshWarningDelay {
+            meshWarning = "Nenhuma malha até agora. Confira se a mão ou a capa não cobre o sensor LiDAR, ao lado das câmeras."
+        } else {
+            meshWarning = nil
+        }
+
+        if elapsed - lastProgressLogSeconds >= CaptureController.progressLogInterval {
+            lastProgressLogSeconds = elapsed
+            var depthText = "sem gravador"
+            if let recorder = recorder {
+                let fraction = recorder.lastDepthValidFraction
+                let last = fraction < 0 ? "?" : "\(Int((fraction * 100).rounded()))%"
+                depthText = "\(recorder.depthSummary) último=\(last)"
+            }
+            AppLog.info(.capture, "Andamento: t=\(Int(elapsed)) s blocos=\(meshAnchors.count) triângulos=\(triangles) fotos=\(keyframeCount) rastreamento=\(lastTrackingText) profundidade: \(depthText)")
+        }
     }
 
     // MARK: - Notificações do sistema
@@ -476,6 +511,14 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                 meshAnchors[meshAnchor.identifier] = meshAnchor
             }
         }
+        if !firstMeshLogged && !meshAnchors.isEmpty {
+            firstMeshLogged = true
+            var elapsed = accumulatedSeconds
+            if let start = segmentStart {
+                elapsed += Date().timeIntervalSince(start)
+            }
+            AppLog.info(.capture, "Primeira malha recebida após \(String(format: "%.1f", elapsed)) s")
+        }
     }
 
     func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
@@ -500,6 +543,13 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             default:
                 trackingMessage = "Rastreamento limitado"
             }
+        }
+
+        // Só registra quando muda, para o log mostrar a sequência de estados.
+        let text = trackingMessage ?? "normal"
+        if text != lastTrackingText {
+            lastTrackingText = text
+            AppLog.info(.capture, "Rastreamento: \(text)")
         }
     }
 
