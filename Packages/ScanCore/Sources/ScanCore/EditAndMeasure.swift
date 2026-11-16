@@ -34,13 +34,9 @@ public enum MeshCropper {
                 return c0 * anchor.positions[offset] + c1 * anchor.positions[offset + 1] + c2 * anchor.positions[offset + 2] + translation
             }
 
-            // Vértices mantidos são copiados na ordem em que aparecem; -1 = ainda não copiado.
-            var remap = [Int32](repeating: -1, count: anchor.vertexCount)
-            var positions: [Float] = []
-            var normals: [Float] = []
-            var indices: [UInt32] = []
-            var classifications: [UInt8] = []
-
+            // 1. Quais faces ficam e quais vértices elas usam.
+            var keptFaces: [Int] = []
+            var used = [Bool](repeating: false, count: anchor.vertexCount)
             for face in 0..<anchor.faceCount {
                 let ia = Int(anchor.indices[face * 3])
                 let ib = Int(anchor.indices[face * 3 + 1])
@@ -50,19 +46,36 @@ public enum MeshCropper {
                 if inside == removeInside {
                     continue
                 }
-                for vertex in [ia, ib, ic] {
-                    if remap[vertex] < 0 {
-                        remap[vertex] = Int32(positions.count / 3)
-                        let offset = vertex * 3
-                        positions.append(anchor.positions[offset])
-                        positions.append(anchor.positions[offset + 1])
-                        positions.append(anchor.positions[offset + 2])
-                        normals.append(anchor.normals[offset])
-                        normals.append(anchor.normals[offset + 1])
-                        normals.append(anchor.normals[offset + 2])
-                    }
-                    indices.append(UInt32(remap[vertex]))
-                }
+                keptFaces.append(face)
+                used[ia] = true
+                used[ib] = true
+                used[ic] = true
+            }
+
+            // 2. Copia os vértices usados na ordem original. Assim um bloco que não perdeu
+            // nada sai idêntico ao que entrou, e os índices continuam previsíveis.
+            var remap = [UInt32](repeating: 0, count: anchor.vertexCount)
+            var positions: [Float] = []
+            var normals: [Float] = []
+            for vertex in 0..<anchor.vertexCount where used[vertex] {
+                remap[vertex] = UInt32(positions.count / 3)
+                let offset = vertex * 3
+                positions.append(anchor.positions[offset])
+                positions.append(anchor.positions[offset + 1])
+                positions.append(anchor.positions[offset + 2])
+                normals.append(anchor.normals[offset])
+                normals.append(anchor.normals[offset + 1])
+                normals.append(anchor.normals[offset + 2])
+            }
+
+            var indices: [UInt32] = []
+            var classifications: [UInt8] = []
+            indices.reserveCapacity(keptFaces.count * 3)
+            classifications.reserveCapacity(keptFaces.count)
+            for face in keptFaces {
+                indices.append(remap[Int(anchor.indices[face * 3])])
+                indices.append(remap[Int(anchor.indices[face * 3 + 1])])
+                indices.append(remap[Int(anchor.indices[face * 3 + 2])])
                 classifications.append(anchor.classifications[face])
             }
 
@@ -121,9 +134,9 @@ public struct MeasurementRecord: Codable, Equatable, Identifiable {
     public var value: Float {
         switch kind {
         case .distance:
-            return Measurement.pathLength(points)
+            return MeasureMath.pathLength(points)
         case .area:
-            return Measurement.horizontalArea(points)
+            return MeasureMath.horizontalArea(points)
         }
     }
 
@@ -149,7 +162,8 @@ public struct MeasurementRecord: Codable, Equatable, Identifiable {
     }
 }
 
-public enum Measurement {
+/// Contas da medição. (O nome evita colidir com o `Measurement` do Foundation.)
+public enum MeasureMath {
     /// Comprimento do caminho que passa pelos pontos, na ordem.
     public static func pathLength(_ points: [SIMD3<Float>]) -> Float {
         if points.count < 2 {

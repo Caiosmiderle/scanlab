@@ -57,11 +57,13 @@ final class MeshCropperTests: XCTestCase {
         XCTAssertEqual(result.count, 1)
         XCTAssertEqual(result[0].faceCount, 1)
         XCTAssertEqual(result[0].vertexCount, 3)
-        XCTAssertEqual(result[0].indices, [0, 1, 2])
         XCTAssertEqual(result[0].classifications, [2])
         XCTAssertTrue(result[0].isConsistent)
-        // A face que sobrou é a segunda: vértices 0, 3 e 2 do quadrado original.
-        XCTAssertEqual(Array(result[0].positions[3..<6]), [0, 0, 1])
+        // A face que sobrou é a segunda (vértices 0, 3 e 2 do quadrado). Na ordem original
+        // os vértices usados são 0, 2 e 3, que viram 0, 1 e 2: a face fica [0, 2, 1].
+        XCTAssertEqual(result[0].indices, [0, 2, 1])
+        XCTAssertEqual(Array(result[0].positions[3..<6]), [1, 0, 1])
+        XCTAssertEqual(Array(result[0].positions[6..<9]), [0, 0, 1])
     }
 
     func testCuttingEverythingGivesNoBlocks() {
@@ -88,16 +90,16 @@ final class MeasurementTests: XCTestCase {
     func testDistanceAndPath() {
         let a = SIMD3<Float>(0, 0, 0)
         let b = SIMD3<Float>(3, 0, 4)
-        XCTAssertEqual(Measurement.pathLength([a, b]), 5, accuracy: 1e-6)
-        XCTAssertEqual(Measurement.pathLength([a, b, SIMD3<Float>(3, 2, 4)]), 7, accuracy: 1e-6)
-        XCTAssertEqual(Measurement.pathLength([a]), 0)
+        XCTAssertEqual(MeasureMath.pathLength([a, b]), 5, accuracy: 1e-6)
+        XCTAssertEqual(MeasureMath.pathLength([a, b, SIMD3<Float>(3, 2, 4)]), 7, accuracy: 1e-6)
+        XCTAssertEqual(MeasureMath.pathLength([a]), 0)
     }
 
     func testHorizontalAreaIgnoresHeight() {
         // Retângulo de 4 m x 3 m no piso, com os cantos em alturas diferentes.
         let points = [SIMD3<Float>(0, 0.0, 0), SIMD3<Float>(4, 0.1, 0), SIMD3<Float>(4, -0.05, 3), SIMD3<Float>(0, 0.02, 3)]
-        XCTAssertEqual(Measurement.horizontalArea(points), 12, accuracy: 1e-5)
-        XCTAssertEqual(Measurement.horizontalArea([points[0], points[1]]), 0)
+        XCTAssertEqual(MeasureMath.horizontalArea(points), 12, accuracy: 1e-5)
+        XCTAssertEqual(MeasureMath.horizontalArea([points[0], points[1]]), 0)
     }
 
     func testRecordValuesAndFormatting() {
@@ -120,11 +122,11 @@ final class MeasurementTests: XCTestCase {
     func testNearestVertexSnapsOnlyWhenClose() {
         let positions: [Float] = [0, 0, 0, 1, 0, 0, 1, 0, 1]
         // A 2 cm do segundo vértice: gruda nele.
-        XCTAssertEqual(Measurement.nearestVertex(to: SIMD3<Float>(1.02, 0, 0), positions: positions, maxDistance: 0.05),
+        XCTAssertEqual(MeasureMath.nearestVertex(to: SIMD3<Float>(1.02, 0, 0), positions: positions, maxDistance: 0.05),
                        SIMD3<Float>(1, 0, 0))
         // A 30 cm de qualquer vértice: não gruda.
-        XCTAssertNil(Measurement.nearestVertex(to: SIMD3<Float>(0.5, 0.3, 0.5), positions: positions, maxDistance: 0.05))
-        XCTAssertNil(Measurement.nearestVertex(to: SIMD3<Float>(0, 0, 0), positions: [], maxDistance: 1))
+        XCTAssertNil(MeasureMath.nearestVertex(to: SIMD3<Float>(0.5, 0.3, 0.5), positions: positions, maxDistance: 0.05))
+        XCTAssertNil(MeasureMath.nearestVertex(to: SIMD3<Float>(0, 0, 0), positions: [], maxDistance: 1))
     }
 
     func testCSV() {
@@ -133,7 +135,7 @@ final class MeasurementTests: XCTestCase {
             MeasurementRecord(name: "Sala", kind: .area,
                               points: [SIMD3<Float>(0, 0, 0), SIMD3<Float>(4, 0, 0), SIMD3<Float>(4, 0, 3), SIMD3<Float>(0, 0, 3)])
         ]
-        let lines = Measurement.csv(records).split(separator: "\n").map { String($0) }
+        let lines = MeasureMath.csv(records).split(separator: "\n").map { String($0) }
 
         XCTAssertEqual(lines.count, 4)
         XCTAssertEqual(lines[0], "nome;tipo;valor;unidade;pontos (x y z em metros)")
