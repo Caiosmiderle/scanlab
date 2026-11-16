@@ -101,6 +101,22 @@ struct ByteBuffer {
         appendUInt32(value.bitPattern)
     }
 
+    mutating func appendDouble(_ value: Double) {
+        var littleEndian = value.bitPattern.littleEndian
+        withUnsafeBytes(of: &littleEndian) { bytes in
+            data.append(contentsOf: bytes)
+        }
+    }
+
+    /// Texto ASCII num campo de tamanho fixo, completado com zeros (ou cortado).
+    mutating func appendFixedASCII(_ text: String, length: Int) {
+        var bytes = Array(text.utf8.prefix(length))
+        while bytes.count < length {
+            bytes.append(0)
+        }
+        data.append(contentsOf: bytes)
+    }
+
     mutating func appendASCII(_ text: String) {
         data.append(contentsOf: Array(text.utf8))
     }
