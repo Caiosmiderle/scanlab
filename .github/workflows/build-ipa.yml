@@ -35,6 +35,11 @@ jobs:
           SCANLAB_SAMPLE_DIR: ${{ github.workspace }}/amostras
         run: swift test --package-path Packages/ScanCore
 
+      - name: Validar glTF de exemplo com o validador da Khronos
+        run: |
+          npm install --no-save --no-audit --no-fund gltf-validator
+          node tools/validate-gltf.js amostras/amostra-com-cor.glb amostras/amostra-sem-cor.glb amostras/amostra.gltf
+
       - uses: actions/upload-artifact@v4
         with:
           name: ScanLab-amostras
