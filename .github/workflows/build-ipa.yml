@@ -15,7 +15,9 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    # Intel em vez de arm64: em 16/11/2026 a fila das máquinas arm64 do GitHub ficou
+    # sem capacidade e cancelou o build depois de 15 min. O build para iPhone é o mesmo.
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
