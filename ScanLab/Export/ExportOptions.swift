@@ -126,14 +126,67 @@ struct ExportOptions {
     /// Remover pedaços soltos com poucos triângulos.
     var removeSmallComponents: Bool
     var cloudDensity: CloudDensity
+    /// Atlas de textura para OBJ, GLB e USDZ.
+    var texture: TextureProfile
+    /// Reduzir a malha para cerca de metade dos triângulos.
+    var reduce: Bool
+    /// Suavizar o ruído do sensor.
+    var smooth: Bool
 
     /// Componentes com menos triângulos que isto são removidos.
     static let smallComponentFaces = 40
 
+    /// Formatos que recebem a versão texturizada quando a textura está ligada.
+    static let texturedFormats: [ExportFormat] = [.obj, .glb, .usdz]
+
+    /// Se a textura vai mesmo ser gerada: precisa estar ligada e ter um formato que a use.
+    var wantsTexture: Bool {
+        if texture == .off {
+            return false
+        }
+        for format in ExportOptions.texturedFormats where formats.contains(format) {
+            return true
+        }
+        return false
+    }
+
     /// Resumo curto para o log e para o `meta.json`.
     var summary: String {
         let names = ExportFormat.allCases.filter { formats.contains($0) }.map { $0.rawValue }.joined(separator: ",")
-        return "formatos=\(names) eixo=\(axis.rawValue) cor=\(colorize) oclusão=\(useOcclusion) soldar=\(weld) limpar=\(removeSmallComponents) nuvem=\(cloudDensity.rawValue)"
+        return "formatos=\(names) eixo=\(axis.rawValue) cor=\(colorize) oclusão=\(useOcclusion) soldar=\(weld) limpar=\(removeSmallComponents) reduzir=\(reduce) suavizar=\(smooth) textura=\(texture.rawValue) nuvem=\(cloudDensity.rawValue)"
+    }
+
+    /// Estimativa grosseira do tempo de processamento, em segundos.
+    /// Os fatores vêm de uma medição no iPad Pro M2 (cor por vértice: 72 mil vértices
+    /// com 142 fotos em 3 s) e servem só para dar ordem de grandeza.
+    func estimatedSeconds(vertexCount: Int, faceCount: Int, keyframeCount: Int) -> Double {
+        var vertices = Double(vertexCount)
+        var faces = Double(faceCount)
+        if reduce {
+            vertices *= 0.5
+            faces *= 0.5
+        }
+        let photos = Double(max(0, keyframeCount))
+        var seconds = 1.0 + faces * 0.000004
+        if smooth {
+            seconds += faces * 0.000003
+        }
+        if reduce {
+            seconds += Double(faceCount) * 0.00001
+        }
+        if colorize && photos > 0 {
+            seconds += vertices * photos * 0.0000003
+        }
+        if wantsTexture && photos > 0 {
+            seconds += faces * photos * 0.0000004
+            seconds += Double(texture.atlasSize * texture.atlasSize) * 0.00000025
+        }
+        seconds += Double(formats.count) * faces * 0.000004
+        if let spacing = cloudDensity.spacing, formats.contains(where: { $0.isCloud }) {
+            // Mais pontos quanto menor o espaçamento.
+            seconds += faces * 0.00002 * Double(0.02 / spacing)
+        }
+        return seconds
     }
 }
 
@@ -152,13 +205,17 @@ extension AppSettings {
         }
         let axis = UpAxis(rawValue: defaults.string(forKey: SettingsKeys.exportUpAxis) ?? "") ?? .zUp
         let density = CloudDensity(rawValue: defaults.string(forKey: SettingsKeys.cloudDensity) ?? "") ?? .vertices
+        let texture = TextureProfile(rawValue: defaults.string(forKey: SettingsKeys.textureProfile) ?? "") ?? .off
         return ExportOptions(formats: formats,
                              axis: axis,
                              colorize: colorizeOnExport,
                              useOcclusion: useOcclusion,
                              weld: boolSetting(SettingsKeys.weldVertices, true),
                              removeSmallComponents: boolSetting(SettingsKeys.removeSmallComponents, true),
-                             cloudDensity: density)
+                             cloudDensity: density,
+                             texture: texture,
+                             reduce: boolSetting(SettingsKeys.reduceMesh, false),
+                             smooth: boolSetting(SettingsKeys.smoothMesh, false))
     }
 
     static func boolSetting(_ key: String, _ fallback: Bool) -> Bool {

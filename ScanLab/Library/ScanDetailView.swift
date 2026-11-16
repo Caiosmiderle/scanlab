@@ -73,6 +73,9 @@ struct ScanDetailView: View {
     // Só para a tela se redesenhar quando as opções mudarem na tela de opções.
     @AppStorage(SettingsKeys.exportFormats) private var formatsText: String = AppSettings.defaultExportFormats
     @AppStorage(SettingsKeys.exportUpAxis) private var axisRaw: String = UpAxis.zUp.rawValue
+    @AppStorage(SettingsKeys.textureProfile) private var textureRaw: String = TextureProfile.off.rawValue
+    @AppStorage(SettingsKeys.reduceMesh) private var reduceMesh: Bool = false
+    @AppStorage(SettingsKeys.smoothMesh) private var smoothMesh: Bool = false
 
     @State private var outputFiles: [URL] = []
     @State private var diskSize: Int64 = 0
@@ -244,6 +247,12 @@ struct ScanDetailView: View {
                         .font(.headline)
                 }
                 .disabled(options.formats.isEmpty)
+
+                if !options.formats.isEmpty {
+                    Text(estimateText(options, scan))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if let resultText = job.resultText {
@@ -366,46 +375,68 @@ struct ScanDetailView: View {
             return "Nenhum formato marcado"
         }
         let names = ExportFormat.allCases.filter { options.formats.contains($0) }.map { $0.title }
-        let axis = options.axis == .zUp ? "Z para cima" : "Y para cima"
-        return "\(names.joined(separator: ", ")) · \(axis)"
+        var parts = [names.joined(separator: ", "), options.axis == .zUp ? "Z para cima" : "Y para cima"]
+        if options.texture != .off {
+            parts.append("textura \(options.texture.title)")
+        }
+        if options.reduce {
+            parts.append("reduzida")
+        }
+        if options.smooth {
+            parts.append("suavizada")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Tempo estimado do processamento, só como ordem de grandeza.
+    private func estimateText(_ options: ExportOptions, _ scan: ScanMeta) -> String {
+        let seconds = options.estimatedSeconds(vertexCount: scan.vertexCount,
+                                               faceCount: scan.faceCount,
+                                               keyframeCount: scan.keyframeCount ?? 0)
+        if seconds < 90 {
+            return "Tempo estimado: cerca de \(max(1, Int(seconds.rounded()))) s"
+        }
+        return "Tempo estimado: cerca de \(Int((seconds / 60).rounded())) min"
     }
 
     // MARK: - Compartilhamento
 
-    /// Arquivo que acompanha outro e precisa ir junto: o `.mtl` do OBJ e o `.bin` do glTF.
-    private func companionFile(for file: URL) -> URL? {
-        var companionExtension: String? = nil
+    /// Arquivos que acompanham outro e precisam ir junto: o `.mtl` (e a textura `.jpg`)
+    /// do OBJ e o `.bin` do glTF. Todos têm o mesmo nome, com outra extensão.
+    private func companionFiles(for file: URL) -> [URL] {
+        var extensions: [String] = []
         switch file.pathExtension.lowercased() {
         case "obj":
-            companionExtension = "mtl"
+            extensions = ["mtl", "jpg"]
         case "gltf":
-            companionExtension = "bin"
+            extensions = ["bin"]
         default:
-            companionExtension = nil
+            extensions = []
         }
-        guard let ext = companionExtension else {
-            return nil
+        var companions: [URL] = []
+        for ext in extensions {
+            let companion = file.deletingPathExtension().appendingPathExtension(ext)
+            if FileManager.default.fileExists(atPath: companion.path) {
+                companions.append(companion)
+            }
         }
-        let companion = file.deletingPathExtension().appendingPathExtension(ext)
-        return FileManager.default.fileExists(atPath: companion.path) ? companion : nil
+        return companions
     }
 
     private func fileDetail(_ file: URL) -> String {
         let size = AppPaths.formatBytes(AppPaths.fileSize(file))
-        if let companion = companionFile(for: file) {
-            return "\(size) · vai junto com o .\(companion.pathExtension)"
+        let companions = companionFiles(for: file)
+        if !companions.isEmpty {
+            let names = companions.map { "." + $0.pathExtension }.joined(separator: " e ")
+            return "\(size) · vai junto com \(names)"
         }
         return size
     }
 
     private func share(_ file: URL) {
         shareError = nil
-        var urls = [file]
-        // Esses formatos referenciam o segundo arquivo pelo nome: os dois precisam ir juntos.
-        if let companion = companionFile(for: file) {
-            urls.append(companion)
-        }
-        shareRequest = ShareRequest(urls: urls)
+        // Esses formatos referenciam os outros arquivos pelo nome: precisam ir juntos.
+        shareRequest = ShareRequest(urls: [file] + companionFiles(for: file))
     }
 
     private func shareZip(scanID: String, kind: String) {

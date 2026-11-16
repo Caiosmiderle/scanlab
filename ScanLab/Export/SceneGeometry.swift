@@ -88,6 +88,31 @@ enum SceneGeometry {
     }
 }
 
+extension SceneGeometry {
+    /// Geometria texturizada: posição, normal e UV, com a imagem do atlas no material.
+    static func texturedGeometry(from mesh: TexturedMesh, image: UIImage) -> SCNGeometry {
+        let floatSize = MemoryLayout<Float>.size
+        let uvData = mesh.uvs.withUnsafeBufferPointer { Data(buffer: $0) }
+        let uvSource = SCNGeometrySource(data: uvData,
+                                         semantic: .texcoord,
+                                         vectorCount: mesh.vertexCount,
+                                         usesFloatComponents: true,
+                                         componentsPerVector: 2,
+                                         bytesPerComponent: floatSize,
+                                         dataOffset: 0,
+                                         dataStride: floatSize * 2)
+        let geometry = SCNGeometry(sources: [vectorSource(mesh.positions, semantic: .vertex),
+                                             vectorSource(mesh.normals, semantic: .normal),
+                                             uvSource],
+                                   elements: [triangleElement(mesh.indices)])
+        let material = SCNMaterial()
+        material.diffuse.contents = image
+        material.isDoubleSided = true
+        geometry.materials = [material]
+        return geometry
+    }
+}
+
 /// USDZ pelo SceneKit: monta uma cena com a malha e pede ao SceneKit para gravá-la.
 /// O SceneKit escolhe o formato pela extensão do arquivo, e `.usdz` abre direto no
 /// Quick Look (com AR) do iPhone, do iPad e do Mac.
@@ -96,6 +121,25 @@ enum USDZExporter {
     static func write(_ mesh: WorldMesh, to url: URL) throws {
         let scene = SCNScene()
         let node = SCNNode(geometry: SceneGeometry.geometry(from: mesh, vertexColors: true))
+        node.name = "scan"
+        scene.rootNode.addChildNode(node)
+
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+        let succeeded = scene.write(to: url, options: nil, delegate: nil, progressHandler: nil)
+        if !succeeded || !FileManager.default.fileExists(atPath: url.path) {
+            throw ExportError.usdzFailed
+        }
+    }
+
+    /// USDZ texturizado: a imagem do atlas vai embutida no arquivo.
+    static func writeTextured(_ mesh: TexturedMesh, jpeg: Data, to url: URL) throws {
+        guard let image = UIImage(data: jpeg) else {
+            throw ExportError.usdzFailed
+        }
+        let scene = SCNScene()
+        let node = SCNNode(geometry: SceneGeometry.texturedGeometry(from: mesh, image: image))
         node.name = "scan"
         scene.rootNode.addChildNode(node)
 

@@ -15,6 +15,9 @@ struct ExportOptionsView: View {
     @AppStorage(SettingsKeys.useOcclusion) private var useOcclusion: Bool = true
     @AppStorage(SettingsKeys.weldVertices) private var weld: Bool = true
     @AppStorage(SettingsKeys.removeSmallComponents) private var removeSmall: Bool = true
+    @AppStorage(SettingsKeys.textureProfile) private var textureRaw: String = TextureProfile.off.rawValue
+    @AppStorage(SettingsKeys.reduceMesh) private var reduce: Bool = false
+    @AppStorage(SettingsKeys.smoothMesh) private var smooth: Bool = false
 
     var body: some View {
         Form {
@@ -60,6 +63,21 @@ struct ExportOptionsView: View {
                 Text("Cor")
             } footer: {
                 Text(hasKeyframes ? "A cor vem das fotos salvas durante o scan." : "Este scan não tem fotos salvas, então sai sem cor.")
+            }
+
+            Section {
+                Picker("Textura", selection: $textureRaw) {
+                    ForEach(TextureProfile.allCases) { profile in
+                        Text(profile.title).tag(profile.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Toggle("Reduzir a malha pela metade", isOn: $reduce)
+                Toggle("Suavizar", isOn: $smooth)
+            } header: {
+                Text("Processamento")
+            } footer: {
+                Text("A textura cola as fotos sobre o modelo, com muito mais detalhe que a cor por vértice, e vale para OBJ, GLB e USDZ. Rápido usa uma imagem de 4096 px; HD usa 8192 px e demora mais. Reduzir corta cerca de metade dos triângulos. Suavizar tira o ruído do sensor e arredonda um pouco as quinas.")
             }
 
             Section {

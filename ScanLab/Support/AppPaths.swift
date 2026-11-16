@@ -81,6 +81,10 @@ enum SettingsKeys {
     static let cloudDensity = "cloudDensity"
     static let weldVertices = "weldVertices"
     static let removeSmallComponents = "removeSmallComponents"
+    /// Valor bruto de `TextureProfile`.
+    static let textureProfile = "textureProfile"
+    static let reduceMesh = "reduceMesh"
+    static let smoothMesh = "smoothMesh"
 }
 
 /// Leitura dos ajustes com os valores padrão da especificação.

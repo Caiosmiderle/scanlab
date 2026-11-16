@@ -89,6 +89,19 @@ enum MeshExporter {
             let report = mesh.removeSmallComponents(minFaces: ExportOptions.smallComponentFaces)
             cleanupNotes += " pedaços=\(report.componentCount) pedaços removidos=\(report.removedComponents) (\(report.removedFaces) faces)"
         }
+        // Suavizar e reduzir (M7). Funcionam melhor com a malha soldada, porque dependem
+        // de saber quais triângulos são vizinhos.
+        if options.smooth {
+            progress(0.07, "Suavizando...")
+            mesh = MeshProcessing.smooth(mesh)
+            cleanupNotes += " suavizada"
+        }
+        if options.reduce {
+            progress(0.08, "Reduzindo a malha...")
+            let before = mesh.faceCount
+            mesh = MeshProcessing.reduce(mesh, targetRatio: 0.5)
+            cleanupNotes += " reduzida de \(before) para \(mesh.faceCount) faces"
+        }
         AppLog.info(.export, "Limpeza do scan \(scanID): \(cleanupNotes)")
         guard mesh.faceCount > 0 else {
             throw ExportError.emptyMesh
@@ -101,9 +114,23 @@ enum MeshExporter {
         if options.colorize {
             progress(0.10, "Colorindo a malha...")
             let report = ColorProcessor.colorize(mesh: &mesh, scanID: scanID, useOcclusion: options.useOcclusion) { fraction in
-                progress(0.10 + 0.38 * fraction, "Colorindo a malha...")
+                progress(0.10 + 0.18 * fraction, "Colorindo a malha...")
             }
             colored = report != nil
+        }
+        try check(cancel)
+
+        // Atlas de textura (M7), para os formatos que carregam imagem: OBJ, GLB e USDZ.
+        // Também usa as poses das câmeras, então a malha continua em Y-up aqui.
+        var textured: TexturedOutput? = nil
+        if options.wantsTexture {
+            progress(0.28, "Gerando a textura...")
+            textured = TextureProcessor.texturize(mesh: mesh, scanID: scanID, profile: options.texture, useOcclusion: options.useOcclusion) { fraction in
+                progress(0.28 + 0.21 * fraction, "Gerando a textura...")
+            }
+            if textured == nil {
+                AppLog.warning(.export, "Scan \(scanID): textura pedida, mas não foi possível gerar (sem fotos?). Saindo com cor por vértice.")
+            }
         }
         try check(cancel)
 
@@ -145,10 +172,18 @@ enum MeshExporter {
         }
 
         // 4. Formatos que são sempre Y-up (glTF e USD definem o eixo no próprio padrão).
-        let glbURL = outputs.appendingPathComponent(base + ".glb")
+        // Com textura, o nome do arquivo ganha "-textura" para não confundir com a
+        // versão de cor por vértice gerada em outra rodada.
+        let textureTag = textured == nil ? "" : "-textura"
+
+        let glbURL = outputs.appendingPathComponent(base + textureTag + ".glb")
         try run(.glb, [glbURL]) {
             let sink = try FileSink(url: glbURL)
-            try GLTFWriter.writeGLB(mesh, to: sink) { report(.glb, $0) }
+            if let textured = textured {
+                try TexturedWriters.writeGLB(textured.mesh, imageData: textured.jpeg, to: sink) { report(.glb, $0) }
+            } else {
+                try GLTFWriter.writeGLB(mesh, to: sink) { report(.glb, $0) }
+            }
             try sink.close()
         }
 
@@ -162,9 +197,13 @@ enum MeshExporter {
             try binarySink.close()
         }
 
-        let usdzURL = outputs.appendingPathComponent(base + ".usdz")
+        let usdzURL = outputs.appendingPathComponent(base + textureTag + ".usdz")
         try run(.usdz, [usdzURL]) {
-            try USDZExporter.write(mesh, to: usdzURL)
+            if let textured = textured {
+                try USDZExporter.writeTextured(textured.mesh, jpeg: textured.jpeg, to: usdzURL)
+            } else {
+                try USDZExporter.write(mesh, to: usdzURL)
+            }
         }
 
         // 5. Nuvem de pontos (montada em Y-up, convertida junto com a malha).
@@ -192,13 +231,24 @@ enum MeshExporter {
             try sink.close()
         }
 
-        let objURL = outputs.appendingPathComponent("\(base)-\(axisSuffix).obj")
-        let mtlURL = outputs.appendingPathComponent("\(base)-\(axisSuffix).mtl")
-        try run(.obj, [objURL, mtlURL]) {
+        let objURL = outputs.appendingPathComponent("\(base)\(textureTag)-\(axisSuffix).obj")
+        let mtlURL = outputs.appendingPathComponent("\(base)\(textureTag)-\(axisSuffix).mtl")
+        let textureURL = outputs.appendingPathComponent("\(base)\(textureTag)-\(axisSuffix).jpg")
+        try run(.obj, textured == nil ? [objURL, mtlURL] : [objURL, mtlURL, textureURL]) {
             let sink = try FileSink(url: objURL)
-            try OBJWriter.write(mesh, to: sink, materialLibraryName: mtlURL.lastPathComponent) { report(.obj, $0) }
-            try sink.close()
-            try Data(OBJWriter.materialFileContents().utf8).write(to: mtlURL, options: .atomic)
+            if let textured = textured {
+                // O OBJ texturizado sai no eixo escolhido, como os outros OBJ.
+                var texturedMesh = textured.mesh
+                texturedMesh.applyAxis(options.axis)
+                try TexturedWriters.writeOBJ(texturedMesh, to: sink, materialLibraryName: mtlURL.lastPathComponent) { report(.obj, $0) }
+                try sink.close()
+                try Data(TexturedWriters.materialFileContents(textureFileName: textureURL.lastPathComponent).utf8).write(to: mtlURL, options: .atomic)
+                try textured.jpeg.write(to: textureURL, options: .atomic)
+            } else {
+                try OBJWriter.write(mesh, to: sink, materialLibraryName: mtlURL.lastPathComponent) { report(.obj, $0) }
+                try sink.close()
+                try Data(OBJWriter.materialFileContents().utf8).write(to: mtlURL, options: .atomic)
+            }
         }
 
         let stlURL = outputs.appendingPathComponent("\(base)-\(axisSuffix).stl")
