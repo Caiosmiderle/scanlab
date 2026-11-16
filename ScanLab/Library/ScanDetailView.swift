@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import ScanCore
 
 /// Estado de uma exportação em andamento, observado pela tela de detalhe.
@@ -9,7 +10,9 @@ final class ExportJob: ObservableObject {
     @Published private(set) var resultText: String? = nil
     @Published var errorMessage: String? = nil
 
-    func start(scanID: String, axis: UpAxis) {
+    private var cancelFlag = CancelFlag()
+
+    func start(scanID: String, options: ExportOptions) {
         if isRunning {
             return
         }
@@ -18,19 +21,27 @@ final class ExportJob: ObservableObject {
         message = "Preparando..."
         resultText = nil
         errorMessage = nil
+        let flag = CancelFlag()
+        cancelFlag = flag
 
         // Trabalho pesado fora da thread principal; a interface só recebe o progresso.
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let result = try MeshExporter.exportPLYAndOBJ(scanID: scanID, axis: axis, colorize: AppSettings.colorizeOnExport) { fraction, text in
+                let result = try MeshExporter.export(scanID: scanID, options: options, cancel: flag) { fraction, text in
                     DispatchQueue.main.async {
                         self.progress = fraction
                         self.message = text
                     }
                 }
-                let text = "Arquivos gerados em \(String(format: "%.1f", result.seconds)) s."
+                var text = "\(result.files.count) arquivos gerados em \(String(format: "%.1f", result.seconds)) s."
+                var failureText: String? = nil
+                if !result.failures.isEmpty {
+                    text += " \(result.failures.count) formato(s) falharam."
+                    failureText = result.failures.joined(separator: "\n")
+                }
                 DispatchQueue.main.async {
                     self.resultText = text
+                    self.errorMessage = failureText
                     self.isRunning = false
                 }
             } catch {
@@ -43,9 +54,15 @@ final class ExportJob: ObservableObject {
             }
         }
     }
+
+    /// Pede para parar. A exportação para na próxima troca de etapa.
+    func cancel() {
+        cancelFlag.cancel()
+        message = "Cancelando..."
+    }
 }
 
-/// Detalhe de um scan: informações, exportação e arquivos gerados.
+/// Detalhe de um item da biblioteca: informações, processamento e arquivos gerados.
 struct ScanDetailView: View {
     let scanID: String
 
@@ -53,14 +70,18 @@ struct ScanDetailView: View {
     @StateObject private var job = ExportJob()
     @Environment(\.dismiss) private var dismiss
 
+    // Só para a tela se redesenhar quando as opções mudarem na tela de opções.
+    @AppStorage(SettingsKeys.exportFormats) private var formatsText: String = AppSettings.defaultExportFormats
     @AppStorage(SettingsKeys.exportUpAxis) private var axisRaw: String = UpAxis.zUp.rawValue
+
     @State private var outputFiles: [URL] = []
     @State private var diskSize: Int64 = 0
     @State private var showRename = false
     @State private var draftName = ""
     @State private var showDeleteConfirmation = false
+    @State private var showClearConfirmation = false
     @State private var shareRequest: ShareRequest? = nil
-    @State private var isZipping = false
+    @State private var zippingKind: String? = nil
     @State private var shareError: String? = nil
 
     private var scan: ScanMeta? {
@@ -82,6 +103,7 @@ struct ScanDetailView: View {
         }
         .onChange(of: job.isRunning) { _, running in
             if !running {
+                store.reload()
                 refreshFiles()
             }
         }
@@ -90,130 +112,14 @@ struct ScanDetailView: View {
     private func content(_ scan: ScanMeta) -> some View {
         List {
             if scan.isRoomScan {
-                // Item do RoomPlan: não há malha para exportar, só as medidas dos cômodos.
-                Section {
-                    infoRow("Data", scan.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    ForEach(scan.rooms ?? [], id: \.name) { summary in
-                        RoomSummaryRow(summary: summary)
-                            .padding(.vertical, 4)
-                    }
-                    infoRow("Tamanho em disco", AppPaths.formatBytes(diskSize))
-                } header: {
-                    Text("Cômodos")
-                } footer: {
-                    Text("Medidas aproximadas, calculadas pelo RoomPlan. Confira com a trena. A planta está no arquivo .svg e o modelo 3D nos arquivos .usdz.")
-                }
+                roomSection(scan)
             } else {
-            Section("Informações") {
-                infoRow("Data", scan.createdAt.formatted(date: .abbreviated, time: .shortened))
-                infoRow("Duração", formatDuration(scan.durationSeconds))
-                infoRow("Triângulos", "\(scan.faceCount)")
-                infoRow("Vértices", "\(scan.vertexCount)")
-                infoRow("Blocos de malha", "\(scan.anchorCount)")
-                infoRow("Fotos para cor", (scan.keyframeCount ?? 0) > 0 ? "\(scan.keyframeCount ?? 0)" : "nenhuma (scan sem cor)")
-                infoRow("Classificação", scan.reconstructionMode == "meshWithClassification" ? "Sim" : "Não")
-                infoRow("Tamanho em disco", AppPaths.formatBytes(diskSize))
-                infoRow("Situação", scan.status)
+                viewerSection(scan)
+                infoSection(scan)
+                exportSection(scan)
             }
-
-            Section {
-                Picker("Eixo para cima", selection: $axisRaw) {
-                    Text("Z (CAD, CloudCompare)").tag(UpAxis.zUp.rawValue)
-                    Text("Y (ARKit, Blender)").tag(UpAxis.yUp.rawValue)
-                }
-                .pickerStyle(.segmented)
-                .disabled(job.isRunning)
-
-                if job.isRunning {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ProgressView(value: job.progress)
-                        Text(job.message)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 4)
-                } else {
-                    Button {
-                        job.start(scanID: scan.id, axis: UpAxis(rawValue: axisRaw) ?? .zUp)
-                    } label: {
-                        Label("Gerar PLY e OBJ", systemImage: "square.and.arrow.down.on.square")
-                    }
-                }
-
-                if let resultText = job.resultText {
-                    Label(resultText, systemImage: "checkmark.circle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.green)
-                }
-                if let errorMessage = job.errorMessage {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-            } header: {
-                Text("Exportar")
-            } footer: {
-                Text("Os arquivos são gerados a partir do bruto do scan, que nunca é alterado. Medidas aproximadas: confira com a trena.")
-            }
-            }
-
-            Section {
-                if outputFiles.isEmpty {
-                    Text("Nenhum arquivo gerado ainda.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    Button {
-                        shareZip(scanID: scan.id)
-                    } label: {
-                        HStack {
-                            Label("Compartilhar tudo em ZIP", systemImage: "doc.zipper")
-                            Spacer()
-                            if isZipping {
-                                ProgressView()
-                            }
-                        }
-                    }
-                    .disabled(isZipping || job.isRunning)
-
-                    ForEach(outputFiles, id: \.self) { file in
-                        Button {
-                            share(file)
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(file.lastPathComponent)
-                                        .font(.callout)
-                                    Text(fileDetail(file))
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: "square.and.arrow.up")
-                            }
-                        }
-                        .disabled(job.isRunning)
-                    }
-                }
-
-                if let shareError = shareError {
-                    Label(shareError, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-            } header: {
-                Text("Arquivos")
-            } footer: {
-                Text("O ZIP leva todos os arquivos com os nomes originais; é o jeito mais seguro de mandar o OBJ, que precisa do .mtl ao lado. Eles também estão no app Arquivos, em No Meu iPad → ScanLab → Scans → \(scan.id) → outputs.")
-            }
-
-            Section {
-                Button(role: .destructive) {
-                    showDeleteConfirmation = true
-                } label: {
-                    Label("Apagar scan", systemImage: "trash")
-                }
-                .disabled(job.isRunning)
-            }
+            filesSection(scan)
+            manageSection(scan)
         }
         .navigationTitle(scan.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -227,7 +133,7 @@ struct ScanDetailView: View {
                 }
             }
         }
-        .alert("Renomear scan", isPresented: $showRename) {
+        .alert("Renomear", isPresented: $showRename) {
             TextField("Nome", text: $draftName)
             Button("Salvar") {
                 store.rename(id: scan.id, to: draftName)
@@ -239,7 +145,7 @@ struct ScanDetailView: View {
             ActivityView(urls: request.urls)
                 .presentationDetents([.medium, .large])
         }
-        .alert("Apagar este scan?", isPresented: $showDeleteConfirmation) {
+        .alert("Apagar este item?", isPresented: $showDeleteConfirmation) {
             Button("Apagar", role: .destructive) {
                 store.delete(id: scan.id)
                 dismiss()
@@ -249,6 +155,199 @@ struct ScanDetailView: View {
         } message: {
             Text("O bruto e todos os arquivos exportados serão apagados do aparelho.")
         }
+        .alert("Apagar os arquivos gerados?", isPresented: $showClearConfirmation) {
+            Button("Apagar arquivos", role: .destructive) {
+                clearOutputs(scan)
+            }
+            Button("Cancelar", role: .cancel) {
+            }
+        } message: {
+            Text("Só os arquivos exportados são apagados. O bruto do scan continua e dá para gerar tudo de novo.")
+        }
+    }
+
+    // MARK: - Seções
+
+    /// Item do RoomPlan: não há malha para exportar, só as medidas dos cômodos.
+    private func roomSection(_ scan: ScanMeta) -> some View {
+        Section {
+            infoRow("Data", scan.createdAt.formatted(date: .abbreviated, time: .shortened))
+            ForEach(scan.rooms ?? [], id: \.name) { summary in
+                RoomSummaryRow(summary: summary)
+                    .padding(.vertical, 4)
+            }
+            infoRow("Tamanho em disco", AppPaths.formatBytes(diskSize))
+        } header: {
+            Text("Cômodos")
+        } footer: {
+            Text("Medidas aproximadas, calculadas pelo RoomPlan. Confira com a trena. A planta está no arquivo .svg e o modelo 3D nos arquivos .usdz.")
+        }
+    }
+
+    private func viewerSection(_ scan: ScanMeta) -> some View {
+        Section {
+            NavigationLink {
+                ScanViewerScreen(scanID: scan.id, scanName: scan.name)
+            } label: {
+                Label("Ver em 3D", systemImage: "cube.transparent")
+                    .font(.headline)
+            }
+            .disabled(job.isRunning)
+        }
+    }
+
+    private func infoSection(_ scan: ScanMeta) -> some View {
+        Section("Informações") {
+            infoRow("Data", scan.createdAt.formatted(date: .abbreviated, time: .shortened))
+            infoRow("Duração", formatDuration(scan.durationSeconds))
+            infoRow("Triângulos", "\(scan.faceCount)")
+            infoRow("Vértices", "\(scan.vertexCount)")
+            infoRow("Blocos de malha", "\(scan.anchorCount)")
+            infoRow("Fotos para cor", (scan.keyframeCount ?? 0) > 0 ? "\(scan.keyframeCount ?? 0)" : "nenhuma (scan sem cor)")
+            infoRow("Classificação", scan.reconstructionMode == "meshWithClassification" ? "Sim" : "Não")
+            infoRow("Tamanho em disco", AppPaths.formatBytes(diskSize))
+            infoRow("Situação", scan.status)
+        }
+    }
+
+    private func exportSection(_ scan: ScanMeta) -> some View {
+        let options = AppSettings.exportOptions
+        return Section {
+            NavigationLink {
+                ExportOptionsView(hasKeyframes: (scan.keyframeCount ?? 0) > 0)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Opções de exportação")
+                    Text(optionsSummary(options))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .disabled(job.isRunning)
+
+            if job.isRunning {
+                VStack(alignment: .leading, spacing: 8) {
+                    ProgressView(value: job.progress)
+                    Text(job.message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Button("Cancelar", role: .destructive) {
+                        job.cancel()
+                    }
+                }
+                .padding(.vertical, 4)
+            } else {
+                Button {
+                    job.start(scanID: scan.id, options: AppSettings.exportOptions)
+                } label: {
+                    Label("Gerar arquivos", systemImage: "square.and.arrow.down.on.square")
+                        .font(.headline)
+                }
+                .disabled(options.formats.isEmpty)
+            }
+
+            if let resultText = job.resultText {
+                Label(resultText, systemImage: "checkmark.circle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.green)
+            }
+            if let errorMessage = job.errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("Processar e exportar")
+        } footer: {
+            Text("Os arquivos são gerados a partir do bruto do scan, que nunca é alterado. Dá para gerar de novo quantas vezes quiser, com outras opções. Medidas aproximadas: confira com a trena.")
+        }
+    }
+
+    private func filesSection(_ scan: ScanMeta) -> some View {
+        Section {
+            if outputFiles.isEmpty {
+                Text("Nenhum arquivo gerado ainda.")
+                    .foregroundStyle(.secondary)
+            } else {
+                zipButton(title: "Compartilhar arquivos gerados (ZIP)", icon: "doc.zipper", kind: "outputs", scanID: scan.id)
+
+                ForEach(outputFiles, id: \.self) { file in
+                    Button {
+                        share(file)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(file.lastPathComponent)
+                                    .font(.callout)
+                                Text(fileDetail(file))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    .disabled(job.isRunning)
+                }
+            }
+
+            if let shareError = shareError {
+                Label(shareError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("Arquivos")
+        } footer: {
+            Text("O ZIP leva os arquivos com os nomes originais; é o jeito mais seguro de mandar formatos que vêm em mais de um arquivo (OBJ + MTL, glTF + BIN).")
+        }
+    }
+
+    private func manageSection(_ scan: ScanMeta) -> some View {
+        Section {
+            zipButton(title: "Compartilhar todos os dados (ZIP)", icon: "archivebox", kind: "all", scanID: scan.id)
+
+            Button {
+                openInFiles(scan)
+            } label: {
+                Label("Abrir no app Arquivos", systemImage: "folder")
+            }
+
+            if !outputFiles.isEmpty {
+                Button(role: .destructive) {
+                    showClearConfirmation = true
+                } label: {
+                    Label("Apagar arquivos gerados", systemImage: "eraser")
+                }
+                .disabled(job.isRunning)
+            }
+
+            Button(role: .destructive) {
+                showDeleteConfirmation = true
+            } label: {
+                Label("Apagar item", systemImage: "trash")
+            }
+            .disabled(job.isRunning)
+        } header: {
+            Text("Dados do scan")
+        } footer: {
+            Text("\"Todos os dados\" leva a pasta inteira: bruto, fotos, profundidade, frames.json e arquivos gerados. Pode ter centenas de megabytes.")
+        }
+    }
+
+    private func zipButton(title: String, icon: String, kind: String, scanID: String) -> some View {
+        Button {
+            shareZip(scanID: scanID, kind: kind)
+        } label: {
+            HStack {
+                Label(title, systemImage: icon)
+                Spacer()
+                if zippingKind == kind {
+                    ProgressView()
+                }
+            }
+        }
+        .disabled(zippingKind != nil || job.isRunning)
     }
 
     private func infoRow(_ title: String, _ value: String) -> some View {
@@ -262,21 +361,39 @@ struct ScanDetailView: View {
         .accessibilityElement(children: .combine)
     }
 
+    private func optionsSummary(_ options: ExportOptions) -> String {
+        if options.formats.isEmpty {
+            return "Nenhum formato marcado"
+        }
+        let names = ExportFormat.allCases.filter { options.formats.contains($0) }.map { $0.title }
+        let axis = options.axis == .zUp ? "Z para cima" : "Y para cima"
+        return "\(names.joined(separator: ", ")) · \(axis)"
+    }
+
     // MARK: - Compartilhamento
 
-    /// O `.mtl` que acompanha um `.obj` (mesmo nome, outra extensão), se existir.
-    private func materialFile(for file: URL) -> URL? {
-        guard file.pathExtension.lowercased() == "obj" else {
+    /// Arquivo que acompanha outro e precisa ir junto: o `.mtl` do OBJ e o `.bin` do glTF.
+    private func companionFile(for file: URL) -> URL? {
+        var companionExtension: String? = nil
+        switch file.pathExtension.lowercased() {
+        case "obj":
+            companionExtension = "mtl"
+        case "gltf":
+            companionExtension = "bin"
+        default:
+            companionExtension = nil
+        }
+        guard let ext = companionExtension else {
             return nil
         }
-        let material = file.deletingPathExtension().appendingPathExtension("mtl")
-        return FileManager.default.fileExists(atPath: material.path) ? material : nil
+        let companion = file.deletingPathExtension().appendingPathExtension(ext)
+        return FileManager.default.fileExists(atPath: companion.path) ? companion : nil
     }
 
     private func fileDetail(_ file: URL) -> String {
         let size = AppPaths.formatBytes(AppPaths.fileSize(file))
-        if materialFile(for: file) != nil {
-            return "\(size) · vai junto com o .mtl"
+        if let companion = companionFile(for: file) {
+            return "\(size) · vai junto com o .\(companion.pathExtension)"
         }
         return size
     }
@@ -284,35 +401,53 @@ struct ScanDetailView: View {
     private func share(_ file: URL) {
         shareError = nil
         var urls = [file]
-        // O OBJ referencia o material pelo nome do arquivo: os dois precisam ir juntos.
-        if let material = materialFile(for: file) {
-            urls.append(material)
+        // Esses formatos referenciam o segundo arquivo pelo nome: os dois precisam ir juntos.
+        if let companion = companionFile(for: file) {
+            urls.append(companion)
         }
         shareRequest = ShareRequest(urls: urls)
     }
 
-    private func shareZip(scanID: String) {
-        if isZipping {
+    private func shareZip(scanID: String, kind: String) {
+        if zippingKind != nil {
             return
         }
-        isZipping = true
+        zippingKind = kind
         shareError = nil
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let zipURL = try ZipArchiver.zipOutputs(scanID: scanID)
+                let zipURL = kind == "all" ? try ZipArchiver.zipWholeScan(scanID: scanID) : try ZipArchiver.zipOutputs(scanID: scanID)
                 DispatchQueue.main.async {
-                    isZipping = false
+                    zippingKind = nil
                     shareRequest = ShareRequest(urls: [zipURL])
                 }
             } catch {
                 let text = error.localizedDescription
-                AppLog.error(.export, "Falha ao gerar o ZIP do scan \(scanID): \(text)")
+                AppLog.error(.export, "Falha ao gerar o ZIP (\(kind)) do scan \(scanID): \(text)")
                 DispatchQueue.main.async {
-                    isZipping = false
+                    zippingKind = nil
                     shareError = "Não foi possível gerar o ZIP: \(text)"
                 }
             }
         }
+    }
+
+    /// Abre a pasta do scan no app Arquivos do sistema.
+    private func openInFiles(_ scan: ScanMeta) {
+        let path = store.directory(for: scan.id).path
+        // "shareddocuments://" é o esquema que o app Arquivos usa para abrir uma pasta local.
+        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
+        if let url = URL(string: "shareddocuments://" + encoded) {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    private func clearOutputs(_ scan: ScanMeta) {
+        for file in outputFiles {
+            try? FileManager.default.removeItem(at: file)
+        }
+        AppLog.info(.export, "Arquivos gerados do scan \(scan.id) apagados")
+        refreshFiles()
     }
 
     private func refreshFiles() {

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Aba "Biblioteca": lista básica dos scans salvos (a versão completa é o marco M4).
 struct LibraryView: View {
@@ -18,7 +19,7 @@ struct LibraryView: View {
                             NavigationLink {
                                 ScanDetailView(scanID: scan.id)
                             } label: {
-                                ScanRow(scan: scan)
+                                ScanRow(scan: scan, sizeBytes: store.sizes[scan.id])
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
@@ -62,20 +63,47 @@ struct LibraryView: View {
 private struct ScanRow: View {
     let scan: ScanMeta
 
+    /// Tamanho em disco, quando já foi medido.
+    var sizeBytes: Int64? = nil
+
     private var detailText: String {
+        var parts: [String] = []
         if scan.isRoomScan {
             let count = scan.rooms?.count ?? 0
-            return count == 1 ? "1 cômodo · planta e USDZ" : "\(count) cômodos · planta e USDZ"
+            parts.append(count == 1 ? "1 cômodo" : "\(count) cômodos")
+            parts.append("planta e USDZ")
+        } else {
+            parts.append("\(scan.faceCount) triângulos")
+            parts.append(scan.status)
         }
-        return "\(scan.faceCount) triângulos · \(scan.status)"
+        if let sizeBytes = sizeBytes {
+            parts.append(AppPaths.formatBytes(sizeBytes))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Foto do scan, se houver; senão um ícone.
+    @ViewBuilder
+    private var thumbnail: some View {
+        if let image = UIImage(contentsOfFile: ScanStore.shared.thumbnailURL(for: scan.id).path) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                Color.gray.opacity(0.2)
+                Image(systemName: scan.isRoomScan ? "house" : "cube.transparent")
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+            }
+        }
     }
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: scan.isRoomScan ? "house" : "cube.transparent")
-                .font(.title2)
-                .foregroundStyle(.tint)
-                .frame(width: 36)
+            thumbnail
+                .frame(width: 72, height: 54)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {

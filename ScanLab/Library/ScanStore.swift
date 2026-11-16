@@ -24,6 +24,8 @@ struct ScanMeta: Codable, Identifiable, Equatable {
     var kind: String?
     /// Resumo dos cômodos de um item do RoomPlan.
     var rooms: [RoomSummary]?
+    /// Parâmetros da última exportação (formatos, eixo, limpeza...).
+    var lastExport: String?
 
     var isRoomScan: Bool {
         return kind == ScanKind.room
@@ -69,8 +71,14 @@ final class ScanStore: ObservableObject {
     static let shared = ScanStore()
 
     @Published private(set) var scans: [ScanMeta] = []
+    /// Tamanho em disco de cada item, por identificador.
+    @Published private(set) var sizes: [String: Int64] = [:]
 
     private init() {}
+
+    func thumbnailURL(for id: String) -> URL {
+        return directory(for: id).appendingPathComponent(ThumbnailMaker.fileName)
+    }
 
     // MARK: - Caminhos
 
@@ -108,6 +116,21 @@ final class ScanStore: ObservableObject {
         }
         loaded.sort { $0.createdAt > $1.createdAt }
         scans = loaded
+
+        // Tamanhos e miniaturas exigem percorrer as pastas (centenas de fotos por
+        // scan), então saem da thread principal e chegam um instante depois.
+        let ids = loaded.map { $0.id }
+        DispatchQueue.global(qos: .utility).async {
+            var measured: [String: Int64] = [:]
+            for id in ids {
+                let folder = self.directory(for: id)
+                ThumbnailMaker.ensureThumbnail(scanFolder: folder)
+                measured[id] = AppPaths.directorySize(folder)
+            }
+            DispatchQueue.main.async {
+                self.sizes = measured
+            }
+        }
     }
 
     func loadMeta(id: String) -> ScanMeta? {
